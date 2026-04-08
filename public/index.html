@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AeroLogic - Visa Intelligence Globe</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Sora:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">AeroLogic</div>
+        <div class="topbar-center">
+          <span class="pulse-dot"></span>
+          <span id="global-status">Visa Intelligence</span>
+        </div>
+        <button class="profile-btn" aria-label="Profile">P</button>
+      </header>
+
+      <aside class="panel panel-left">
+        <div>
+          <h2>Your Documents</h2>
+          <div class="doc-list" id="doc-list"></div>
+          <button id="add-document-btn" class="add-doc-btn" type="button">+ Add Document</button>
+        </div>
+        <footer>© AeroLogic. All Rights Reserved.</footer>
+      </aside>
+
+      <main class="panel panel-globe">
+        <div class="search-wrap">
+          <input
+            id="country-search"
+            type="search"
+            placeholder="Search for a country"
+            autocomplete="off"
+            aria-label="Search country"
+          />
+          <ul id="search-results" class="search-results"></ul>
+        </div>
+        <div id="globe-root" aria-label="Interactive visa globe"></div>
+        <div id="globe-loading" class="globe-loading">Loading globe data...</div>
+        <div class="legend">
+          <div><span class="dot visa-free"></span>Visa-free</div>
+          <div><span class="dot evisa"></span>eVisa / VoA</div>
+          <div><span class="dot visa-required"></span>Visa Required</div>
+          <div><span class="dot travel-ban"></span>Travel Ban</div>
+        </div>
+      </main>
+
+      <aside class="panel panel-right" id="country-panel">
+        <div class="country-head">
+          <div id="country-emoji" class="country-emoji">🌍</div>
+          <h3 id="country-name">Select a country</h3>
+        </div>
+        <div id="entry-pill" class="entry-pill neutral">Choose a destination</div>
+
+        <section class="requirements">
+          <h4>Entry Requirements</h4>
+          <div class="requirement-row">
+            <span>Visa</span>
+            <span id="req-visa">-</span>
+          </div>
+          <div class="requirement-row">
+            <span>Passport Validity</span>
+            <span id="req-validity">-</span>
+          </div>
+          <div class="requirement-row">
+            <span>Allowed Stay</span>
+            <span id="req-stay">-</span>
+          </div>
+        </section>
+
+        <section class="explanation">
+          <h4>Explanation</h4>
+          <p id="country-explainer">
+            Add one or more travel documents and click a country on the globe to check your visa status.
+          </p>
+        </section>
+      </aside>
+    </div>
+
+    <dialog id="doc-modal">
+      <form method="dialog" id="doc-form">
+        <h3>Add Document</h3>
+        <label>
+          Issuing Country
+          <select id="doc-country" required></select>
+        </label>
+        <label>
+          Document Type
+          <select id="doc-type" required>
+            <option value="Passport">Passport</option>
+            <option value="OCI Card">OCI Card</option>
+            <option value="Permanent Resident">Permanent Resident</option>
+            <option value="Residence Permit">Residence Permit</option>
+            <option value="ID Card">ID Card</option>
+          </select>
+        </label>
+        <div class="dialog-actions">
+          <button type="button" class="ghost-btn" id="cancel-doc">Cancel</button>
+          <button type="submit" class="solid-btn">Save Document</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
