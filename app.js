@@ -1,6 +1,6 @@
 "use strict";
 
-const GEOJSON_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
+const GEOJSON_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json";
 const COUNTRY_API_URL = "https://restcountries.com/v3.1/all?fields=name,flag,altSpellings,cca2";
 
 const STATUS = {
@@ -57,6 +57,64 @@ const NAME_ALIASES = {
   "West Bank": "Palestine"
 };
 
+// ISO-2 codes for all 26 Schengen Area members
+const SCHENGEN_CODES = new Set([
+  "AT","BE","CZ","DK","EE","FI","FR","DE","GR","HU",
+  "IS","IT","LV","LI","LT","LU","MT","NL","NO","PL",
+  "PT","SK","SI","ES","SE","CH"
+]);
+
+// Countries that honour a valid visa or PR card from a given issuing country.
+// Each entry: { dest: ISO-2, status: STATUS.*, days: number|null }
+const VISA_GRANTS = {
+  // A valid US non-immigrant visa (B1/B2 or similar) unlocks these destinations
+  US: [
+    { dest: "AL", status: "visa-free",       days: 90  },  // Albania
+    { dest: "AM", status: "visa-free",       days: null },  // Armenia
+    { dest: "BA", status: "visa-free",       days: 30  },  // Bosnia & Herzegovina
+    { dest: "CO", status: "visa-free",       days: 90  },  // Colombia
+    { dest: "GE", status: "visa-free",       days: 365 },  // Georgia
+    { dest: "MD", status: "visa-free",       days: 90  },  // Moldova
+    { dest: "ME", status: "visa-free",       days: 30  },  // Montenegro
+    { dest: "MK", status: "visa-free",       days: 90  },  // North Macedonia
+    { dest: "MX", status: "visa-free",       days: 180 },  // Mexico
+    { dest: "PA", status: "visa-free",       days: 180 },  // Panama
+    { dest: "PE", status: "visa-free",       days: 183 },  // Peru
+    { dest: "PH", status: "visa-on-arrival", days: 59  },  // Philippines (extended)
+    { dest: "RS", status: "visa-free",       days: 30  },  // Serbia
+  ],
+  // A valid Schengen visa (any member state) unlocks these destinations
+  SCHENGEN: [
+    { dest: "AL", status: "visa-free",       days: 90  },
+    { dest: "BA", status: "visa-free",       days: 30  },
+    { dest: "GE", status: "visa-free",       days: 90  },
+    { dest: "MD", status: "visa-free",       days: 90  },
+    { dest: "ME", status: "visa-free",       days: 30  },
+    { dest: "MK", status: "visa-free",       days: 90  },
+    { dest: "RS", status: "visa-free",       days: 30  },
+    { dest: "CO", status: "visa-free",       days: 90  },
+    { dest: "PE", status: "visa-free",       days: 183 },
+    { dest: "PA", status: "visa-free",       days: 180 },
+  ],
+  // UK Standard Visitor visa
+  GB: [
+    { dest: "GE", status: "visa-free",       days: 365 },
+    { dest: "AL", status: "visa-free",       days: 90  },
+    { dest: "BA", status: "visa-free",       days: 30  },
+    { dest: "ME", status: "visa-free",       days: 30  },
+    { dest: "MK", status: "visa-free",       days: 90  },
+    { dest: "RS", status: "visa-free",       days: 30  },
+    { dest: "CO", status: "visa-free",       days: 90  },
+  ],
+  // Canadian Temporary Resident Visa
+  CA: [
+    { dest: "GE", status: "visa-free",       days: 365 },
+    { dest: "AL", status: "visa-free",       days: 90  },
+    { dest: "MX", status: "visa-free",       days: 180 },
+    { dest: "PH", status: "visa-on-arrival", days: 59  },
+  ],
+};
+
 const DOCS_KEY = "aerologic-docs";
 const ONBOARDED_KEY = "aerologic-onboarded";
 
@@ -77,6 +135,7 @@ function saveDocuments(docs) {
 
 const AUTO_CLEAR_DOC_TYPES = new Set([
   "Passport",
+  "Visa",
   "Permanent Resident",
   "Residence Permit",
   "OCI Card"
@@ -213,6 +272,16 @@ function countryDetailsFromRecord(status, countryName) {
     };
   }
 
+  if (detail.sourceCode === "VISA_GRANT") {
+    const dur = detail.durationDays;
+    return {
+      visa: "Not Required",
+      validity: "Must be valid",
+      stay: Number.isFinite(dur) ? `${dur} days` : "Varies",
+      explanation: `Access granted because you hold a ${detail.grantingType} from ${detail.grantingCountry}. This country accepts it in lieu of a separate visa. Always verify current rules before travel.`
+    };
+  }
+
   const dur = detail.durationDays;
   const stayCopy = Number.isFinite(dur) ? `${dur} days` : "Varies";
   const validity =
@@ -282,31 +351,66 @@ function isBetterStatus(candidate, current) {
   return candidateRank > currentRank;
 }
 
+// Returns all visa-grant entries for a given issuing country code,
+// including Schengen grants if the code is a Schengen member.
+function getVisaGrants(code) {
+  const grants = [...(VISA_GRANTS[code] || [])];
+  if (SCHENGEN_CODES.has(code)) {
+    grants.push(...(VISA_GRANTS.SCHENGEN || []));
+  }
+  return grants;
+}
+
 function applyDocumentOverrides() {
   state.documents.forEach((doc) => {
-    if (!AUTO_CLEAR_DOC_TYPES.has(doc.type)) return;
+    const code = resolveCountryCode(doc.country);
 
-    let countryName = doc.country;
-    if (!state.countryByName.has(countryName)) {
-      const code = resolveCountryCode(doc.country);
-      if (code && state.countryNameByCode.has(code)) {
-        const mappedName = state.countryNameByCode.get(code);
-        if (state.countryByName.has(mappedName)) countryName = mappedName;
+    // 1. Mark issuing country as visa-free for passport / residency documents
+    if (AUTO_CLEAR_DOC_TYPES.has(doc.type)) {
+      let countryName = doc.country;
+      if (!state.countryByName.has(countryName) && code && state.countryNameByCode.has(code)) {
+        const mapped = state.countryNameByCode.get(code);
+        if (state.countryByName.has(mapped)) countryName = mapped;
+      }
+      if (state.countryByName.has(countryName)) {
+        state.statusByCountry.set(countryName, STATUS.VISA_FREE);
+        state.detailByCountry.set(countryName, {
+          status: STATUS.VISA_FREE,
+          visa: "Not Required",
+          durationDays: null,
+          sourceCode: "LOCAL_DOC",
+          sourceUpdatedAt: null,
+          passport: null,
+          destination: { name: countryName },
+          documentType: doc.type
+        });
       }
     }
 
-    if (!state.countryByName.has(countryName)) return;
+    // 2. Apply visa-grant access for Visa and Permanent Resident documents
+    if (doc.type !== "Visa" && doc.type !== "Permanent Resident") return;
+    if (!code) return;
 
-    state.statusByCountry.set(countryName, STATUS.VISA_FREE);
-    state.detailByCountry.set(countryName, {
-      status: STATUS.VISA_FREE,
-      visa: "Not Required",
-      durationDays: null,
-      sourceCode: "LOCAL_DOC",
-      sourceUpdatedAt: null,
-      passport: null,
-      destination: { name: countryName },
-      documentType: doc.type
+    getVisaGrants(code).forEach(({ dest, status, days }) => {
+      const destName = state.countryNameByCode.get(dest);
+      if (!destName) return;
+      const existingDetail = state.detailByCountry.get(destName);
+      if (existingDetail?.sourceCode === "LOCAL_DOC") return;
+      const currentStatus = state.statusByCountry.get(destName) || STATUS.VISA_REQUIRED;
+      if (!isBetterStatus(status, currentStatus)) return;
+
+      state.statusByCountry.set(destName, status);
+      state.detailByCountry.set(destName, {
+        status,
+        visa: status === STATUS.VISA_FREE ? "Not Required" : "Visa on Arrival",
+        durationDays: days,
+        sourceCode: "VISA_GRANT",
+        sourceUpdatedAt: null,
+        passport: null,
+        destination: { name: destName },
+        grantingCountry: doc.country,
+        grantingType: doc.type
+      });
     });
   });
 }
@@ -637,8 +741,14 @@ function initGlobe() {
     dragState: null,
     autoRotate: true,
     rotationTransition: null,
-    lastFrame: performance.now()
+    lastFrame: performance.now(),
+    zoomLevel: 1.0,
+    baseScale: 0
   };
+
+  function applyZoom() {
+    projection.scale(state.globe.baseScale * state.globe.zoomLevel);
+  }
 
   function resize() {
     const width = window.innerWidth;
@@ -649,11 +759,53 @@ function initGlobe() {
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    projection.translate([width / 2, height / 2]).scale(Math.min(width, height) * 0.42);
+    state.globe.baseScale = Math.min(width, height) * 0.42;
+    projection.translate([width / 2, height / 2]);
+    applyZoom();
   }
 
   resize();
   window.addEventListener("resize", resize);
+
+  // Scroll-wheel zoom
+  canvas.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? 1.08 : 0.93;
+    state.globe.zoomLevel = clamp(state.globe.zoomLevel * factor, 0.5, 12);
+    applyZoom();
+    state.globe.autoRotate = false;
+    if (restartTimer) clearTimeout(restartTimer);
+    restartTimer = setTimeout(() => { state.globe.autoRotate = true; }, 2400);
+  }, { passive: false });
+
+  // Pinch-to-zoom
+  let pinchStartDist = null;
+  let pinchStartZoom = null;
+
+  canvas.addEventListener("touchstart", (event) => {
+    if (event.touches.length === 2) {
+      pinchStartDist = Math.hypot(
+        event.touches[0].clientX - event.touches[1].clientX,
+        event.touches[0].clientY - event.touches[1].clientY
+      );
+      pinchStartZoom = state.globe.zoomLevel;
+    }
+  }, { passive: true });
+
+  canvas.addEventListener("touchmove", (event) => {
+    if (event.touches.length !== 2 || pinchStartDist === null) return;
+    event.preventDefault();
+    const dist = Math.hypot(
+      event.touches[0].clientX - event.touches[1].clientX,
+      event.touches[0].clientY - event.touches[1].clientY
+    );
+    state.globe.zoomLevel = clamp(pinchStartZoom * (dist / pinchStartDist), 0.5, 12);
+    applyZoom();
+  }, { passive: false });
+
+  canvas.addEventListener("touchend", (event) => {
+    if (event.touches.length < 2) { pinchStartDist = null; pinchStartZoom = null; }
+  });
 
   let restartTimer = null;
 
@@ -682,9 +834,11 @@ function initGlobe() {
     const dx = event.clientX - state.globe.dragState.x;
     const dy = event.clientY - state.globe.dragState.y;
     if (Math.abs(dx) > 2 || Math.abs(dy) > 2) state.globe.dragState.moved = true;
+    // Divide by zoomLevel so drag speed stays consistent at any zoom
+    const sensitivity = 0.33 / state.globe.zoomLevel;
     projection.rotate([
-      state.globe.dragState.lon + dx * 0.33,
-      clamp(state.globe.dragState.lat - dy * 0.33, -85, 85),
+      state.globe.dragState.lon + dx * sensitivity,
+      clamp(state.globe.dragState.lat - dy * sensitivity, -85, 85),
       0
     ]);
   });
