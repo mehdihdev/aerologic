@@ -295,6 +295,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/new") {
+      serveStatic(req, res, "/new.html");
+      return;
+    }
+
     serveStatic(req, res, pathname);
   } catch (error) {
     sendJson(res, 500, { error: error.message || "Internal server error" });
