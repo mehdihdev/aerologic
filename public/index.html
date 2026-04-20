@@ -3,97 +3,147 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AeroLogic - Visa Intelligence Globe</title>
+    <title>AeroLogic</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Sora:wght@400;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <header class="topbar">
-        <div class="brand">AeroLogic</div>
-        <div class="topbar-center">
-          <span class="pulse-dot"></span>
-          <span id="global-status">Visa Intelligence</span>
-        </div>
-        <button class="profile-btn" aria-label="Profile">P</button>
-      </header>
-
-      <aside class="panel panel-left">
-        <div>
-          <h2>Your Documents</h2>
-          <div class="doc-list" id="doc-list"></div>
-          <button id="add-document-btn" class="add-doc-btn" type="button">+ Add Document</button>
-        </div>
-        <footer>© AeroLogic. All Rights Reserved.</footer>
-      </aside>
-
-      <main class="panel panel-globe">
-        <div class="search-wrap">
-          <input
-            id="country-search"
-            type="search"
-            placeholder="Search for a country"
-            autocomplete="off"
-            aria-label="Search country"
-          />
-          <ul id="search-results" class="search-results"></ul>
-        </div>
-        <div id="globe-root" aria-label="Interactive visa globe"></div>
-        <div id="globe-loading" class="globe-loading">Loading globe data...</div>
-        <div class="legend">
-          <div><span class="dot visa-free"></span>Visa-free</div>
-          <div><span class="dot evisa"></span>eVisa / VoA</div>
-          <div><span class="dot visa-required"></span>Visa Required</div>
-          <div><span class="dot travel-ban"></span>Travel Ban</div>
-        </div>
-      </main>
-
-      <aside class="panel panel-right" id="country-panel">
-        <div class="country-head">
-          <div id="country-emoji" class="country-emoji">🌍</div>
-          <h3 id="country-name">Select a country</h3>
-        </div>
-        <div id="entry-pill" class="entry-pill neutral">Choose a destination</div>
-
-        <section class="requirements">
-          <h4>Entry Requirements</h4>
-          <div class="requirement-row">
-            <span>Visa</span>
-            <span id="req-visa">-</span>
-          </div>
-          <div class="requirement-row">
-            <span>Passport Validity</span>
-            <span id="req-validity">-</span>
-          </div>
-          <div class="requirement-row">
-            <span>Allowed Stay</span>
-            <span id="req-stay">-</span>
-          </div>
-        </section>
-
-        <section class="explanation">
-          <h4>Explanation</h4>
-          <p id="country-explainer">
-            Add one or more travel documents and click a country on the globe to check your visa status.
-          </p>
-        </section>
-      </aside>
+    <!-- Globe fills entire viewport -->
+    <div id="globe-root"></div>
+    <div id="globe-loading" class="globe-loading">
+      <span class="loading-spinner"></span>
+      Initializing…
     </div>
 
+    <!-- Top navigation bar -->
+    <header class="nav">
+      <div class="nav-brand">AeroLogic</div>
+      <div class="nav-search">
+        <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="9" cy="9" r="6" />
+          <path d="m15.5 15.5-3-3" stroke-linecap="round" />
+        </svg>
+        <input
+          id="country-search"
+          type="search"
+          placeholder="Search destination…"
+          autocomplete="off"
+          aria-label="Search country"
+        />
+        <ul id="search-results" class="search-results"></ul>
+      </div>
+      <div class="nav-right">
+        <div class="status-pill">
+          <span class="pulse-dot"></span>
+          <span id="global-status" class="status-text">Visa Intelligence</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Floating documents + legend HUD (bottom-left) -->
+    <aside class="hud hud-left">
+      <div class="hud-header">
+        <span class="hud-label">Documents</span>
+        <button id="add-document-btn" class="icon-btn" type="button" aria-label="Add document" title="Add document">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M10 4v12M4 10h12" />
+          </svg>
+        </button>
+      </div>
+      <div class="doc-list" id="doc-list"></div>
+      <div class="legend">
+        <div class="legend-item"><span class="dot visa-free"></span><span>Visa-free</span></div>
+        <div class="legend-item"><span class="dot evisa"></span><span>eVisa / VoA</span></div>
+        <div class="legend-item"><span class="dot visa-required"></span><span>Visa Required</span></div>
+        <div class="legend-item"><span class="dot travel-ban"></span><span>No Entry</span></div>
+      </div>
+    </aside>
+
+    <!-- Floating country info HUD (bottom-right) -->
+    <aside class="hud hud-right" id="country-panel">
+      <div class="country-head">
+        <span id="country-emoji" class="country-emoji">🌍</span>
+        <h3 id="country-name">Select a country</h3>
+      </div>
+      <div id="entry-pill" class="entry-pill neutral">Choose a destination on the globe</div>
+      <div class="req-grid">
+        <div class="req-item">
+          <span class="req-label">Visa</span>
+          <span id="req-visa" class="req-value">—</span>
+        </div>
+        <div class="req-item">
+          <span class="req-label">Validity</span>
+          <span id="req-validity" class="req-value">—</span>
+        </div>
+        <div class="req-item">
+          <span class="req-label">Stay</span>
+          <span id="req-stay" class="req-value">—</span>
+        </div>
+      </div>
+      <p id="country-explainer" class="explainer">Add travel documents and click a country to see requirements.</p>
+    </aside>
+
+    <!-- First-time onboarding overlay -->
+    <div id="onboarding" class="onboarding hidden">
+      <div class="onboarding-card">
+        <p class="onboarding-wordmark">AeroLogic</p>
+        <h1 class="onboarding-title">Where can you go?</h1>
+        <p class="onboarding-desc">Add your passports or travel permits to visualize live visa access for every country on the globe.</p>
+
+        <div class="onboard-adder">
+          <div class="onboard-search-wrap">
+            <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="9" cy="9" r="6" />
+              <path d="m15.5 15.5-3-3" stroke-linecap="round" />
+            </svg>
+            <input id="onboard-search" type="search" placeholder="Add a country…" autocomplete="off" />
+            <ul id="onboard-results" class="onboard-results"></ul>
+          </div>
+          <select id="onboard-type" class="onboard-type-select">
+            <option value="Passport">Passport</option>
+            <option value="OCI Card">OCI Card</option>
+            <option value="Permanent Resident">Permanent Resident</option>
+            <option value="Residence Permit">Residence Permit</option>
+            <option value="ID Card">ID Card</option>
+          </select>
+        </div>
+
+        <div id="onboard-doc-list" class="onboard-doc-list"></div>
+
+        <div class="onboard-actions">
+          <button id="onboard-skip" class="ghost-btn" type="button">Skip for now</button>
+          <button id="onboard-start" class="solid-btn" type="button" disabled>
+            Explore the globe
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M4 10h12M11 5l5 5-5 5" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add document dialog -->
     <dialog id="doc-modal">
       <form method="dialog" id="doc-form">
-        <h3>Add Document</h3>
-        <label>
-          Issuing Country
+        <div class="modal-top">
+          <h3>Add Document</h3>
+          <button type="button" class="icon-btn" id="cancel-doc" aria-label="Close">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M5 5l10 10M15 5 5 15" />
+            </svg>
+          </button>
+        </div>
+        <label class="field">
+          <span>Issuing Country</span>
           <select id="doc-country" required></select>
         </label>
-        <label>
-          Document Type
+        <label class="field">
+          <span>Document Type</span>
           <select id="doc-type" required>
             <option value="Passport">Passport</option>
             <option value="OCI Card">OCI Card</option>
@@ -102,8 +152,8 @@
             <option value="ID Card">ID Card</option>
           </select>
         </label>
-        <div class="dialog-actions">
-          <button type="button" class="ghost-btn" id="cancel-doc">Cancel</button>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn" id="cancel-doc-footer">Cancel</button>
           <button type="submit" class="solid-btn">Save Document</button>
         </div>
       </form>

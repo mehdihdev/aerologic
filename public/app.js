@@ -12,19 +12,22 @@ const STATUS = {
 };
 
 const STATUS_COLORS = {
-  [STATUS.VISA_FREE]: "rgba(32, 201, 122, 0.88)",
-  [STATUS.EVISA]: "rgba(246, 172, 35, 0.9)",
-  [STATUS.VOA]: "rgba(248, 190, 45, 0.9)",
-  [STATUS.VISA_REQUIRED]: "rgba(248, 79, 112, 0.9)",
-  [STATUS.TRAVEL_BAN]: "rgba(156, 16, 32, 0.95)"
+  [STATUS.VISA_FREE]: "rgba(32, 201, 122, 0.92)",
+  [STATUS.EVISA]: "rgba(246, 172, 35, 0.94)",
+  [STATUS.VOA]: "rgba(248, 190, 45, 0.94)",
+  [STATUS.VISA_REQUIRED]: "rgba(248, 79, 112, 0.90)",
+  [STATUS.TRAVEL_BAN]: "rgba(156, 16, 32, 0.97)"
 };
 
+// Unselected country base color on dark ocean globe
+const OCEAN_COUNTRY_ALPHA = 0.72;
+
 const STATUS_COPY = {
-  [STATUS.VISA_FREE]: "You are cleared for entry",
-  [STATUS.EVISA]: "eVisa required before departure",
-  [STATUS.VOA]: "Visa on arrival available",
-  [STATUS.VISA_REQUIRED]: "Visa required before travel",
-  [STATUS.TRAVEL_BAN]: "You are not cleared for entry"
+  [STATUS.VISA_FREE]: "Visa Free",
+  [STATUS.EVISA]: "eVisa Required",
+  [STATUS.VOA]: "Visa on Arrival",
+  [STATUS.VISA_REQUIRED]: "Visa Required",
+  [STATUS.TRAVEL_BAN]: "No Entry"
 };
 
 const STATUS_RANK = {
@@ -54,11 +57,23 @@ const NAME_ALIASES = {
   "West Bank": "Palestine"
 };
 
-const DEFAULT_DOCUMENTS = [
-  { id: 1, country: "United States of America", type: "Passport" },
-  { id: 2, country: "India", type: "Passport" },
-  { id: 3, country: "Australia", type: "Passport" }
-];
+const DOCS_KEY = "aerologic-docs";
+const ONBOARDED_KEY = "aerologic-onboarded";
+
+function loadSavedDocuments() {
+  try {
+    const raw = localStorage.getItem(DOCS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDocuments(docs) {
+  try {
+    localStorage.setItem(DOCS_KEY, JSON.stringify(docs));
+  } catch {}
+}
 
 const AUTO_CLEAR_DOC_TYPES = new Set([
   "Passport",
@@ -75,8 +90,8 @@ const state = {
   flagsByName: new Map(),
   selectedCountry: null,
   hoveredCountry: null,
-  documents: [...DEFAULT_DOCUMENTS],
-  nextDocId: 4,
+  documents: [],
+  nextDocId: 1,
   statusByCountry: new Map(),
   detailByCountry: new Map(),
   globe: null,
@@ -147,19 +162,17 @@ function summarizeCounts() {
     [STATUS.VISA_REQUIRED]: 0,
     [STATUS.TRAVEL_BAN]: 0
   };
-
   state.statusByCountry.forEach((status) => {
     counts[status] += 1;
   });
-
   return counts;
 }
 
 function updateGlobalSummary() {
   const counts = summarizeCounts();
   const mixed = counts[STATUS.EVISA] + counts[STATUS.VOA];
-  const prefix = state.loadingApiData ? "Updating" : "";
-  elements.globalStatus.textContent = `${prefix}${prefix ? " " : ""}${counts[STATUS.VISA_FREE]} visa-free • ${mixed} eVisa/VoA • ${counts[STATUS.VISA_REQUIRED]} visa required`;
+  const loading = state.loadingApiData ? "Updating · " : "";
+  elements.globalStatus.textContent = `${loading}${counts[STATUS.VISA_FREE]} visa-free · ${mixed} eVisa · ${counts[STATUS.VISA_REQUIRED]} required`;
 }
 
 function renderDocList() {
@@ -185,9 +198,9 @@ function countryDetailsFromRecord(status, countryName) {
   if (!detail) {
     return {
       visa: status === STATUS.VISA_FREE ? "Not Required" : "Visa Required",
-      validity: "Check official source",
+      validity: "Check source",
       stay: "Varies",
-      explanation: "Live visa data unavailable for this destination right now. Try again in a few seconds."
+      explanation: "Visa data unavailable right now. Try again in a moment."
     };
   }
 
@@ -195,8 +208,8 @@ function countryDetailsFromRecord(status, countryName) {
     return {
       visa: "Not Required",
       validity: "N/A",
-      stay: "Resident/Citizen Access",
-      explanation: `Entry is cleared because this country matches a document you hold (${detail.documentType}).`
+      stay: "Resident Access",
+      explanation: `Entry cleared — you hold a ${detail.documentType} for this country.`
     };
   }
 
@@ -214,8 +227,8 @@ function countryDetailsFromRecord(status, countryName) {
   return {
     visa: sourceVisa,
     validity,
-    stay: status === STATUS.TRAVEL_BAN ? "Travel Ban" : stayCopy,
-    explanation: `Based on live visa data for ${sourcePassport} entering ${countryName}. Status updates may change; verify with the destination embassy before travel.`
+    stay: status === STATUS.TRAVEL_BAN ? "Banned" : stayCopy,
+    explanation: `Based on visa data for ${sourcePassport} entering ${countryName}. Verify with destination embassy before travel.`
   };
 }
 
@@ -224,12 +237,12 @@ function updateCountryPanel(countryName) {
     elements.countryEmoji.textContent = "🌍";
     elements.countryName.textContent = "Select a country";
     elements.entryPill.className = "entry-pill neutral";
-    elements.entryPill.textContent = "Choose a destination";
-    elements.reqVisa.textContent = "-";
-    elements.reqValidity.textContent = "-";
-    elements.reqStay.textContent = "-";
+    elements.entryPill.textContent = "Choose a destination on the globe";
+    elements.reqVisa.textContent = "—";
+    elements.reqValidity.textContent = "—";
+    elements.reqStay.textContent = "—";
     elements.countryExplainer.textContent =
-      "Add one or more passport documents and click a country to load live visa requirements.";
+      "Add travel documents and click a country to see entry requirements.";
     return;
   }
 
@@ -327,6 +340,7 @@ async function refreshStatusesFromApi() {
   initDefaultStatuses();
   applyDocumentOverrides();
   updateGlobalSummary();
+
   const destinationCodes = [
     ...new Set(
       state.countries
@@ -470,7 +484,10 @@ function wireSearch() {
     renderSearchResults([]);
   });
 
-  elements.countrySearch.addEventListener("blur", () => setTimeout(() => renderSearchResults([]), 120));
+  elements.countrySearch.addEventListener("blur", () =>
+    setTimeout(() => renderSearchResults([]), 120)
+  );
+
   elements.searchResults.addEventListener("click", (event) => {
     const item = event.target.closest("li[data-country]");
     if (!item) return;
@@ -485,7 +502,11 @@ function wireDocuments() {
   elements.addDocumentBtn.addEventListener("click", () => {
     elements.docModal.showModal();
   });
+
   elements.cancelDoc.addEventListener("click", () => elements.docModal.close());
+  document.getElementById("cancel-doc-footer").addEventListener("click", () =>
+    elements.docModal.close()
+  );
 
   elements.docForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -497,6 +518,7 @@ function wireDocuments() {
     state.nextDocId += 1;
     elements.docModal.close();
     renderDocList();
+    saveDocuments(state.documents);
     await refreshStatusesFromApi();
   });
 
@@ -506,7 +528,95 @@ function wireDocuments() {
     const docId = Number(removeButton.dataset.docId);
     state.documents = state.documents.filter((doc) => doc.id !== docId);
     renderDocList();
+    saveDocuments(state.documents);
     await refreshStatusesFromApi();
+  });
+}
+
+function wireOnboarding() {
+  const overlay = document.getElementById("onboarding");
+  const searchInput = document.getElementById("onboard-search");
+  const searchResults = document.getElementById("onboard-results");
+  const typeSelect = document.getElementById("onboard-type");
+  const docListEl = document.getElementById("onboard-doc-list");
+  const startBtn = document.getElementById("onboard-start");
+  const skipBtn = document.getElementById("onboard-skip");
+
+  const allNames = state.countries.map((c) => c.name).sort((a, b) => a.localeCompare(b));
+  const tempDocs = [];
+  let tempNextId = 1;
+
+  function renderResults(items) {
+    if (!items.length) { searchResults.classList.remove("show"); searchResults.innerHTML = ""; return; }
+    searchResults.innerHTML = items.map((n) => `<li data-name="${n}">${n}</li>`).join("");
+    searchResults.classList.add("show");
+  }
+
+  function renderChips() {
+    docListEl.innerHTML = tempDocs
+      .map((doc) => {
+        const flag = getCountryFlag(doc.country);
+        return `<div class="onboard-chip">
+          <span class="onboard-chip-flag">${flag}</span>
+          <span>${doc.country} · ${doc.type}</span>
+          <button class="onboard-chip-remove" data-id="${doc.id}" aria-label="Remove">×</button>
+        </div>`;
+      })
+      .join("");
+    startBtn.disabled = tempDocs.length === 0;
+  }
+
+  function addDoc(countryName) {
+    const type = typeSelect.value;
+    if (tempDocs.some((d) => d.country === countryName && d.type === type)) return;
+    tempDocs.push({ id: tempNextId++, country: countryName, type });
+    renderChips();
+    searchInput.value = "";
+    renderResults([]);
+  }
+
+  searchInput.addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    if (!q) { renderResults([]); return; }
+    renderResults(allNames.filter((n) => n.toLowerCase().includes(q)).slice(0, 10));
+  });
+
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const first = searchResults.querySelector("li[data-name]");
+    if (!first) return;
+    e.preventDefault();
+    addDoc(first.dataset.name);
+  });
+
+  searchInput.addEventListener("blur", () => setTimeout(() => renderResults([]), 120));
+
+  searchResults.addEventListener("click", (e) => {
+    const li = e.target.closest("li[data-name]");
+    if (li) addDoc(li.dataset.name);
+  });
+
+  docListEl.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-id]");
+    if (!btn) return;
+    const id = Number(btn.dataset.id);
+    tempDocs.splice(tempDocs.findIndex((d) => d.id === id), 1);
+    renderChips();
+  });
+
+  startBtn.addEventListener("click", () => {
+    state.documents = [...tempDocs];
+    state.nextDocId = tempNextId;
+    saveDocuments(state.documents);
+    localStorage.setItem(ONBOARDED_KEY, "1");
+    overlay.classList.add("hidden");
+    renderDocList();
+    refreshStatusesFromApi();
+  });
+
+  skipBtn.addEventListener("click", () => {
+    localStorage.setItem(ONBOARDED_KEY, "1");
+    overlay.classList.add("hidden");
   });
 }
 
@@ -531,15 +641,15 @@ function initGlobe() {
   };
 
   function resize() {
-    const width = elements.globeRoot.clientWidth;
-    const height = elements.globeRoot.clientHeight;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.max(1, Math.floor(width * dpr));
     canvas.height = Math.max(1, Math.floor(height * dpr));
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    projection.translate([width / 2, height / 2]).scale(Math.min(width, height) * 0.47);
+    projection.translate([width / 2, height / 2]).scale(Math.min(width, height) * 0.42);
   }
 
   resize();
@@ -613,18 +723,18 @@ function drawCountryDots(timestamp) {
     const status = state.statusByCountry.get(country.name) || STATUS.VISA_REQUIRED;
     const isSelected = country.name === state.selectedCountry;
     const isHovered = country.name === state.hoveredCountry;
-    const radius = isSelected ? 3.6 + pulse : 1.9;
+    const radius = isSelected ? 3.8 + pulse : 2.0;
 
     context.beginPath();
     context.fillStyle = STATUS_COLORS[status];
-    context.globalAlpha = isHovered ? 1 : 0.88;
+    context.globalAlpha = isHovered ? 1 : 0.9;
     context.arc(point[0], point[1], radius, 0, Math.PI * 2);
     context.fill();
 
     if (isSelected || isHovered) {
       context.beginPath();
-      context.globalAlpha = 0.2 + pulse * 0.18;
-      context.arc(point[0], point[1], radius + 5 + pulse * 1.5, 0, Math.PI * 2);
+      context.globalAlpha = 0.22 + pulse * 0.18;
+      context.arc(point[0], point[1], radius + 5 + pulse * 2, 0, Math.PI * 2);
       context.fill();
     }
   });
@@ -645,7 +755,10 @@ function drawRoutes(timestamp) {
     .filter(Boolean);
 
   passportDocs.forEach((source, index) => {
-    const interpolate = d3.geoInterpolate([source.lng, source.lat], [destination.lng, destination.lat]);
+    const interpolate = d3.geoInterpolate(
+      [source.lng, source.lat],
+      [destination.lng, destination.lat]
+    );
     context.save();
     context.beginPath();
     let started = false;
@@ -662,10 +775,10 @@ function drawRoutes(timestamp) {
       }
     }
     context.strokeStyle = color;
-    context.lineWidth = 1;
-    context.setLineDash([6, 10]);
-    context.lineDashOffset = -(timestamp * 0.05 + index * 7);
-    context.globalAlpha = 0.58;
+    context.lineWidth = 1.2;
+    context.setLineDash([5, 9]);
+    context.lineDashOffset = -(timestamp * 0.055 + index * 8);
+    context.globalAlpha = 0.55;
     context.stroke();
     context.restore();
   });
@@ -681,10 +794,14 @@ function drawCountries() {
     context.beginPath();
     path(country.feature);
     context.fillStyle = STATUS_COLORS[status];
-    context.globalAlpha = isSelected ? 0.96 : 0.78;
+    context.globalAlpha = isSelected ? 0.97 : OCEAN_COUNTRY_ALPHA;
     context.fill();
-    context.lineWidth = isSelected ? 1.1 : 0.45;
-    context.strokeStyle = isHovered ? "rgba(240,247,255,0.9)" : "rgba(180,193,218,0.28)";
+    context.lineWidth = isSelected ? 1.2 : 0.5;
+    context.strokeStyle = isHovered
+      ? "rgba(255, 255, 255, 0.65)"
+      : isSelected
+        ? "rgba(255, 255, 255, 0.5)"
+        : "rgba(255, 255, 255, 0.1)";
     context.stroke();
   });
   context.globalAlpha = 1;
@@ -695,8 +812,8 @@ function drawFrame(timestamp) {
   if (!globe) return;
 
   const { context, projection, path } = globe;
-  const width = elements.globeRoot.clientWidth;
-  const height = elements.globeRoot.clientHeight;
+  const width = window.innerWidth;
+  const height = window.innerHeight;
   const radius = projection.scale();
   const [cx, cy] = projection.translate();
   const dt = Math.min(64, timestamp - globe.lastFrame);
@@ -716,37 +833,51 @@ function drawFrame(timestamp) {
   }
 
   context.clearRect(0, 0, width, height);
-  const gradient = context.createRadialGradient(
-    cx - radius * 0.38,
-    cy - radius * 0.33,
-    radius * 0.14,
+
+  // Atmosphere glow (outside sphere)
+  const atmo = context.createRadialGradient(cx, cy, radius * 0.88, cx, cy, radius * 1.12);
+  atmo.addColorStop(0, "rgba(40, 90, 220, 0)");
+  atmo.addColorStop(0.6, "rgba(30, 70, 180, 0.06)");
+  atmo.addColorStop(1, "rgba(20, 50, 140, 0.0)");
+  context.beginPath();
+  context.arc(cx, cy, radius * 1.12, 0, Math.PI * 2);
+  context.fillStyle = atmo;
+  context.fill();
+
+  // Ocean gradient — dark blue
+  const oceanGrad = context.createRadialGradient(
+    cx - radius * 0.32,
+    cy - radius * 0.28,
+    radius * 0.08,
     cx,
     cy,
-    radius * 1.04
+    radius * 1.02
   );
-  gradient.addColorStop(0, "#f4f7ff");
-  gradient.addColorStop(0.56, "#d6deed");
-  gradient.addColorStop(1, "#adb9cb");
+  oceanGrad.addColorStop(0, "#1e3c6e");
+  oceanGrad.addColorStop(0.4, "#0f2040");
+  oceanGrad.addColorStop(1, "#060d1c");
 
   context.beginPath();
   path({ type: "Sphere" });
-  context.fillStyle = gradient;
+  context.fillStyle = oceanGrad;
   context.fill();
 
+  // Graticule grid
   context.beginPath();
   path(globe.graticule);
-  context.strokeStyle = "rgba(96, 110, 134, 0.2)";
-  context.lineWidth = 0.55;
+  context.strokeStyle = "rgba(70, 110, 200, 0.16)";
+  context.lineWidth = 0.5;
   context.stroke();
 
   drawCountries();
   drawRoutes(timestamp);
   drawCountryDots(timestamp);
 
+  // Sphere border
   context.beginPath();
   path({ type: "Sphere" });
-  context.lineWidth = 1.1;
-  context.strokeStyle = "rgba(72, 82, 103, 0.7)";
+  context.lineWidth = 1.2;
+  context.strokeStyle = "rgba(25, 60, 140, 0.75)";
   context.stroke();
 
   requestAnimationFrame(drawFrame);
@@ -786,10 +917,9 @@ function buildCountries(topology) {
 
 async function init() {
   try {
-    const [topology, _] = await Promise.all([fetchJson(GEOJSON_URL), loadCountryMetadata()]);
+    const [topology] = await Promise.all([fetchJson(GEOJSON_URL), loadCountryMetadata()]);
     buildCountries(topology);
     populateCountrySelect();
-    renderDocList();
     initDefaultStatuses();
     updateCountryPanel(null);
     initGlobe();
@@ -798,9 +928,22 @@ async function init() {
     selectCountry("Germany", true);
     elements.globeLoading.classList.add("hidden");
     requestAnimationFrame(drawFrame);
-    await refreshStatusesFromApi();
+
+    const isOnboarded = localStorage.getItem(ONBOARDED_KEY);
+    if (isOnboarded) {
+      const saved = loadSavedDocuments();
+      if (saved && saved.length > 0) {
+        state.documents = saved;
+        state.nextDocId = Math.max(...saved.map((d) => d.id)) + 1;
+      }
+      renderDocList();
+      await refreshStatusesFromApi();
+    } else {
+      wireOnboarding();
+      document.getElementById("onboarding").classList.remove("hidden");
+    }
   } catch (error) {
-    elements.globeLoading.textContent = `Could not initialize app: ${error?.message || error}`;
+    elements.globeLoading.textContent = `Could not initialize: ${error?.message || error}`;
   }
 }
 
