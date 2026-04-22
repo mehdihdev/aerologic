@@ -1071,7 +1071,10 @@ function buildCountries(topology) {
 
 async function init() {
   try {
-    const [topology] = await Promise.all([fetchJson(GEOJSON_URL), loadCountryMetadata()]);
+    const [topology] = await Promise.all([
+      fetchJson(GEOJSON_URL),
+      loadCountryMetadata().catch((err) => console.warn("Country metadata unavailable:", err))
+    ]);
     buildCountries(topology);
     populateCountrySelect();
     initDefaultStatuses();
