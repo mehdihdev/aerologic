@@ -415,10 +415,16 @@ function applyDocumentOverrides() {
   });
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Request failed (${response.status})`);
-  return response.json();
+async function fetchJson(url, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Request failed (${response.status})`);
+    return response.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function refreshStatusesFromApi() {
@@ -1038,7 +1044,7 @@ function drawFrame(timestamp) {
 }
 
 async function loadCountryMetadata() {
-  const list = await fetchJson(COUNTRY_API_URL);
+  const list = await fetchJson(COUNTRY_API_URL, 6000);
   list.forEach((country) => {
     const common = country?.name?.common;
     const code = country?.cca2;
