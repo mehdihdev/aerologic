@@ -1588,7 +1588,10 @@ function wireOnboarding() {
       const { data, error } = await supabaseClient.auth.signUp({
         email,
         password,
-        options: { data: { display_name: name } }
+        options: {
+          data: { display_name: name },
+          emailRedirectTo: window.location.origin
+        }
       });
       if (error) {
         showError(s1Error, error.message);
