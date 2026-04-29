@@ -1,5 +1,7 @@
 "use strict";
 
+require("dotenv").config();
+
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -229,6 +231,14 @@ const server = http.createServer(async (req, res) => {
   try {
     const reqUrl = new URL(req.url, `http://${req.headers.host}`);
     const pathname = reqUrl.pathname;
+
+    if (pathname === "/api/config") {
+      sendJson(res, 200, {
+        supabaseUrl: process.env.SUPABASE_URL || null,
+        supabaseAnonKey: process.env.SUPABASE_ANON_KEY || null
+      });
+      return;
+    }
 
     if (pathname === "/api/health") {
       sendJson(res, 200, {

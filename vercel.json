@@ -1,5 +1,6 @@
 {
   "rewrites": [
+    { "source": "/api/config", "destination": "/api/config" },
     { "source": "/api/health", "destination": "/api/health" },
     { "source": "/api/visa-status", "destination": "/api/visa-status" },
     { "source": "/api/visa-matrix", "destination": "/api/visa-matrix" }

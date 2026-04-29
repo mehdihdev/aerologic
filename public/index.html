@@ -42,6 +42,12 @@
           <span class="pulse-dot"></span>
           <span id="global-status" class="status-text">Visa Intelligence</span>
         </div>
+        <button id="profile-btn" class="avatar-btn" type="button" aria-label="Open profile">
+          <svg id="profile-btn-icon" viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+            <path d="M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-6 8a6 6 0 0 1 12 0H4z"/>
+          </svg>
+          <span id="profile-btn-initial" class="avatar-initial hidden"></span>
+        </button>
       </div>
     </header>
 
@@ -88,51 +94,248 @@
       <p id="country-explainer" class="explainer">Add travel documents and click a country to see requirements.</p>
     </aside>
 
-    <!-- First-time onboarding overlay -->
-    <div id="onboarding" class="onboarding hidden">
-      <div class="onboarding-card">
-        <p class="onboarding-wordmark">AeroLogic</p>
-        <h1 class="onboarding-title">Where can you go?</h1>
-        <p class="onboarding-desc">Add your passports or travel permits to visualize live visa access for every country on the globe.</p>
+    <!-- Landing page (new users) — transparent overlay, real globe runs behind it -->
+    <div id="landing" class="landing hidden">
 
-        <div class="onboard-adder">
-          <div class="onboard-search-wrap">
-            <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="9" cy="9" r="6" />
-              <path d="m15.5 15.5-3-3" stroke-linecap="round" />
+      <!-- Shared nav -->
+      <nav class="landing-nav">
+        <button class="landing-brand" id="landing-brand" type="button">aerologic</button>
+        <div class="landing-nav-tabs">
+          <button class="landing-tab landing-tab--active" id="landing-tab-home" type="button">Home</button>
+          <button class="landing-tab" id="landing-tab-how" type="button">How it Works</button>
+        </div>
+        <div class="landing-nav-actions">
+          <button id="landing-login" class="landing-login-btn" type="button">Log In</button>
+          <button id="landing-signup" class="landing-signup-btn" type="button">Sign Up</button>
+        </div>
+      </nav>
+
+      <!-- Home view: gradient top, transparent bottom (globe shows through) -->
+      <div id="landing-home-view" class="landing-view">
+        <div class="lv-hero-content">
+          <h1 class="landing-headline">See your world open up</h1>
+          <p class="landing-tagline">Instantly see where you can go based on your passports, visas, and documents</p>
+          <div class="landing-search-shell">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+              <circle cx="9" cy="9" r="6"/><path d="m15.5 15.5-3-3" stroke-linecap="round"/>
             </svg>
-            <input id="onboard-search" type="search" placeholder="Add a country…" autocomplete="off" />
-            <ul id="onboard-results" class="onboard-results"></ul>
+            <input
+              id="landing-country-search"
+              class="landing-search-input"
+              type="search"
+              placeholder="Search any country"
+              autocomplete="off"
+              aria-label="Search any country in the demo"
+            />
+            <ul id="landing-country-results" class="landing-search-results"></ul>
           </div>
-          <select id="onboard-type" class="onboard-type-select">
-            <option value="Passport">Passport</option>
-            <option value="Visa">Visa</option>
-            <option value="Permanent Resident">Permanent Resident</option>
-            <option value="OCI Card">OCI Card</option>
-            <option value="Residence Permit">Residence Permit</option>
-            <option value="ID Card">ID Card</option>
-          </select>
+          <div class="lv-demo-row">
+            <p class="lv-demo-note">Live demo · US Passport preloaded</p>
+            <button class="landing-try-free" id="landing-try-free" type="button">Try it for free →</button>
+          </div>
+          <p class="lv-demo-help">Drag the globe or click any country to preview how far you can travel.</p>
         </div>
+        <!-- Transparent zone — globe + HUDs show through here -->
+        <div class="lv-globe-zone"></div>
+      </div>
 
-        <div id="onboard-doc-list" class="onboard-doc-list"></div>
+      <!-- How it Works view: separate full page, left content + transparent right (globe) -->
+      <div id="landing-how-view" class="landing-view landing-view--page hidden">
+        <div class="lhow-grid">
+          <div class="lhow-content">
+            <h2 class="lhow-title">Travel rules, decoded</h2>
+            <p class="lhow-sub">We take your travel documents and translate them into clear, country-by-country entry access</p>
 
-        <div class="onboard-actions">
-          <button id="onboard-skip" class="ghost-btn" type="button">Skip for now</button>
-          <button id="onboard-start" class="solid-btn" type="button" disabled>
-            Explore the globe
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-              <path d="M4 10h12M11 5l5 5-5 5" />
-            </svg>
-          </button>
+            <div class="lhow-steps">
+              <div class="lhow-step">
+                <div class="lhow-step-num">1</div>
+                <div>
+                  <strong>Add Your Travel Documents</strong>
+                  <p>Add your passports, visas, and permits in seconds. We only ask for country, type, and expiry — never numbers or personal details.</p>
+                </div>
+              </div>
+              <div class="lhow-step">
+                <div class="lhow-step-num">2</div>
+                <div>
+                  <strong>See Your Globe Light Up</strong>
+                  <p>Every country is colored by your best entry option — calculated instantly across all your documents.</p>
+                </div>
+              </div>
+              <div class="lhow-step">
+                <div class="lhow-step-num">3</div>
+                <div>
+                  <strong>Click Any Country for Details</strong>
+                  <p>See the visa type, how long you can stay, and exactly which document grants you access.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="lhow-legend">
+              <div class="lhow-legend-item"><span class="lhow-dot" style="background:#20c97a"></span><span><strong>Visa-free</strong> — Just your passport, no visa needed</span></div>
+              <div class="lhow-legend-item"><span class="lhow-dot" style="background:#f6ac23"></span><span><strong>eVisa / Visa on Arrival</strong> — Apply online or at the border</span></div>
+              <div class="lhow-legend-item"><span class="lhow-dot" style="background:#f84f70"></span><span><strong>Visa Required</strong> — Apply at the embassy in advance</span></div>
+              <div class="lhow-legend-item"><span class="lhow-dot" style="background:#9c1020"></span><span><strong>No Entry</strong> — Currently restricted</span></div>
+            </div>
+
+            <div class="landing-card landing-card--navy">
+              <h3>Privacy Protected</h3>
+              <p class="landing-card-intro">Your data stays yours. AeroLogic only stores the details needed to calculate travel access.</p>
+              <div class="landing-card-stack">
+                <div class="landing-card-row">
+                  <span class="landing-card-icon">01</span>
+                  <div>
+                    <strong>No document numbers</strong>
+                    <p>We only ask for document type, issuing country, and expiration date.</p>
+                  </div>
+                </div>
+                <div class="landing-card-row">
+                  <span class="landing-card-icon">02</span>
+                  <div>
+                    <strong>Travel access only</strong>
+                    <p>Your information is used only to map visa-free, eVisa, and visa-required access.</p>
+                  </div>
+                </div>
+                <div class="landing-card-row">
+                  <span class="landing-card-icon">03</span>
+                  <div>
+                    <strong>Encrypted account sync</strong>
+                    <p>Signed-in users keep their document list private and scoped to their own account.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="lhow-cta">
+              <button class="landing-cta-btn" id="landing-cta-btn" type="button">Get Started Free</button>
+            </div>
+
+            <footer class="landing-footer">
+              <span>© AeroLogic. All Rights Reserved.</span>
+            </footer>
+          </div>
+          <!-- Transparent right column — main app globe shows through -->
+          <div class="lhow-globe-col" aria-hidden="true"></div>
         </div>
+      </div>
+
+    </div>
+
+    <!-- Full-screen onboarding -->
+    <div id="onboarding" class="onboarding hidden">
+      <div class="onb-page">
+        <header class="onb-header">
+          <button id="onb-wordmark-btn" class="onb-wordmark onb-wordmark-btn" type="button">aerologic</button>
+          <button id="onb-back-btn" class="onb-back-btn hidden" type="button">Back to landing</button>
+        </header>
+        <div class="onb-rule"></div>
+
+        <main class="onb-main">
+          <h1 class="onb-title">Get Started with AeroLogic</h1>
+          <p class="onb-subtitle">Create an account or log in to manage your travel documents.</p>
+
+          <div class="onb-progress-row">
+            <span id="onb-step-label">Step 1 of 2</span>
+            <span id="onb-step-name">Account Credentials</span>
+          </div>
+          <div class="onb-bar">
+            <div class="onb-bar-seg" id="onb-bar-1"></div>
+            <div class="onb-bar-seg" id="onb-bar-2"></div>
+          </div>
+
+          <!-- Step 1: Account Credentials -->
+          <div id="onb-s1" class="onb-section">
+            <input id="onb-name" class="onb-input" type="text" placeholder="What should we call you" autocomplete="name" />
+            <input id="onb-email" class="onb-input" type="email" placeholder="Email address" autocomplete="email" />
+            <input id="onb-password" class="onb-input" type="password" placeholder="Create a password" autocomplete="new-password" />
+            <p class="onb-hint">Password must be at least 8 characters long and contain a special character.</p>
+            <label class="onb-check-row">
+              <input type="checkbox" id="onb-terms" />
+              <span>By creating an account, you acknowledge that AeroLogic is a tool and a guide but does not provide legal advice and does not provide visa processing.</span>
+            </label>
+            <p class="onb-error hidden" id="onb-s1-error"></p>
+            <div class="onb-btn-center">
+              <button class="onb-solid-btn onb-solid-btn--wide" id="onb-signup-btn" type="button">Sign up</button>
+            </div>
+            <p class="onb-login-row">Already have an account? <button class="onb-link-btn" id="onb-to-login" type="button">Log in</button></p>
+          </div>
+
+          <!-- Step 1 alt: Log in -->
+          <div id="onb-s1-login" class="onb-section hidden">
+            <input id="onb-login-email" class="onb-input" type="email" placeholder="Email address" autocomplete="email" />
+            <input id="onb-login-password" class="onb-input" type="password" placeholder="Password" autocomplete="current-password" />
+            <p class="onb-error hidden" id="onb-login-error"></p>
+            <div class="onb-btn-center">
+              <button class="onb-solid-btn onb-solid-btn--wide" id="onb-login-btn" type="button">Log in</button>
+            </div>
+            <p class="onb-login-row">Don't have an account? <button class="onb-link-btn" id="onb-to-signup" type="button">Sign up</button></p>
+          </div>
+
+          <!-- Step 2: Add Travel Documents -->
+          <div id="onb-s2" class="onb-section hidden">
+            <div class="onb-field-group">
+              <label class="onb-field-label">Issuing Country</label>
+              <div class="onb-select-wrap">
+                <select id="onb-country" class="onb-select">
+                  <option value="">Select a country</option>
+                </select>
+                <svg class="onb-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 8l5 5 5-5"/>
+                </svg>
+              </div>
+            </div>
+            <div class="onb-two-col">
+              <div class="onb-field-group">
+                <label class="onb-field-label">Document Type</label>
+                <div class="onb-select-wrap">
+                  <select id="onb-doctype" class="onb-select">
+                    <option value="">Select a document</option>
+                    <option value="Passport">Passport</option>
+                    <option value="Visa">Visa</option>
+                    <option value="Permanent Resident">Permanent Resident</option>
+                    <option value="OCI Card">OCI Card</option>
+                    <option value="Residence Permit">Residence Permit</option>
+                    <option value="ID Card">ID Card</option>
+                  </select>
+                  <svg class="onb-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 8l5 5 5-5"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="onb-field-group">
+                <label class="onb-field-label">Expiration Date</label>
+                <div class="onb-date-wrap">
+                  <svg class="onb-cal-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                    <rect x="2" y="4" width="16" height="14" rx="2"/>
+                    <path d="M2 8h16M6 2v4M14 2v4"/>
+                  </svg>
+                  <input type="date" id="onb-expiry" class="onb-date-input" />
+                </div>
+              </div>
+            </div>
+
+            <div class="onb-btn-pair">
+              <button class="onb-outline-btn" id="onb-add-btn" type="button">+ Add another</button>
+              <button class="onb-solid-btn" id="onb-save-btn" type="button">Save and continue</button>
+            </div>
+
+            <div id="onb-doc-grid" class="onb-doc-grid"></div>
+
+            <p class="onb-error hidden" id="onb-s2-error"></p>
+          </div>
+        </main>
+
+        <footer class="onb-footer">
+          <span>© AeroLogic. All Rights Reserved.</span>
+        </footer>
       </div>
     </div>
 
-    <!-- Add document dialog -->
+    <!-- Add / edit document dialog -->
     <dialog id="doc-modal">
       <form method="dialog" id="doc-form">
+        <input type="hidden" id="doc-edit-id" value="" />
         <div class="modal-top">
-          <h3>Add Document</h3>
+          <h3 id="doc-modal-title">Add Document</h3>
           <button type="button" class="icon-btn" id="cancel-doc" aria-label="Close">
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
               <path d="M5 5l10 10M15 5 5 15" />
@@ -156,11 +359,176 @@
         </label>
         <div class="modal-actions">
           <button type="button" class="ghost-btn" id="cancel-doc-footer">Cancel</button>
-          <button type="submit" class="solid-btn">Save Document</button>
+          <button type="submit" class="solid-btn" id="doc-submit-btn">Save Document</button>
         </div>
       </form>
     </dialog>
 
+    <!-- Profile / Settings overlay -->
+    <div id="profile-overlay" class="profile-overlay hidden">
+      <div class="onb-page">
+        <header class="onb-header prof-header">
+          <span class="onb-wordmark">aerologic</span>
+          <button id="prof-close-btn" class="avatar-btn" type="button" aria-label="Close profile">
+            <svg id="prof-close-icon" viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+              <path d="M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-6 8a6 6 0 0 1 12 0H4z"/>
+            </svg>
+            <span id="prof-close-initial" class="avatar-initial hidden"></span>
+          </button>
+        </header>
+        <div class="onb-rule"></div>
+
+        <main class="prof-main">
+          <!-- Hero row -->
+          <div class="prof-hero">
+            <div class="avatar-lg" id="prof-avatar-lg">
+              <svg viewBox="0 0 20 20" fill="currentColor" width="36" height="36" aria-hidden="true">
+                <path d="M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-6 8a6 6 0 0 1 12 0H4z"/>
+              </svg>
+            </div>
+            <div>
+              <h1 class="prof-page-title">Settings</h1>
+              <p class="prof-page-sub">Manage your account and preferences</p>
+            </div>
+          </div>
+
+          <!-- Account & Security -->
+          <section class="prof-section">
+            <h2 class="prof-sec-title">Account &amp; Security</h2>
+            <div id="prof-account-rows">
+
+              <!-- Name -->
+              <div class="prof-row" id="prof-row-name">
+                <span class="prof-row-icon">
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-6 8a6 6 0 0 1 12 0H4z"/></svg>
+                </span>
+                <div class="prof-row-body">
+                  <strong>Name</strong>
+                  <span id="prof-name-val" class="prof-row-sub">—</span>
+                </div>
+                <button class="prof-action-btn" id="prof-change-name" type="button">Change</button>
+              </div>
+              <div class="prof-inline-edit hidden" id="prof-edit-name">
+                <input class="onb-input prof-edit-input" id="prof-name-input" type="text" placeholder="Display name" />
+                <p class="onb-error hidden" id="prof-name-error"></p>
+                <div class="prof-edit-btns">
+                  <button class="onb-outline-btn prof-sm-btn" id="prof-name-cancel" type="button">Cancel</button>
+                  <button class="onb-solid-btn prof-sm-btn" id="prof-name-save" type="button">Save</button>
+                </div>
+              </div>
+
+              <!-- Email -->
+              <div class="prof-row" id="prof-row-email">
+                <span class="prof-row-icon">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+                    <rect x="2" y="4" width="16" height="12" rx="2"/><path d="M2 7l8 5 8-5"/>
+                  </svg>
+                </span>
+                <div class="prof-row-body">
+                  <strong>Email Address</strong>
+                  <span id="prof-email-val" class="prof-row-sub prof-row-sub--accent">—</span>
+                </div>
+                <button class="prof-action-btn" id="prof-change-email" type="button">Change</button>
+              </div>
+              <div class="prof-inline-edit hidden" id="prof-edit-email">
+                <input class="onb-input prof-edit-input" id="prof-email-input" type="email" placeholder="New email address" />
+                <p class="onb-error hidden" id="prof-email-error"></p>
+                <div class="prof-edit-btns">
+                  <button class="onb-outline-btn prof-sm-btn" id="prof-email-cancel" type="button">Cancel</button>
+                  <button class="onb-solid-btn prof-sm-btn" id="prof-email-save" type="button">Save</button>
+                </div>
+              </div>
+
+              <!-- Password -->
+              <div class="prof-row" id="prof-row-pw">
+                <span class="prof-row-icon">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+                    <rect x="4" y="9" width="12" height="9" rx="2"/><path d="M7 9V6a3 3 0 0 1 6 0v3"/>
+                  </svg>
+                </span>
+                <div class="prof-row-body">
+                  <strong>Password</strong>
+                  <span id="prof-pw-val" class="prof-row-sub">••••••••</span>
+                </div>
+                <button class="prof-action-btn" id="prof-change-pw" type="button">Change</button>
+              </div>
+              <div class="prof-inline-edit hidden" id="prof-edit-pw">
+                <input class="onb-input prof-edit-input" id="prof-pw-new" type="password" placeholder="New password" autocomplete="new-password" />
+                <input class="onb-input prof-edit-input" id="prof-pw-confirm" type="password" placeholder="Confirm new password" autocomplete="new-password" />
+                <p class="onb-error hidden" id="prof-pw-error"></p>
+                <div class="prof-edit-btns">
+                  <button class="onb-outline-btn prof-sm-btn" id="prof-pw-cancel" type="button">Cancel</button>
+                  <button class="onb-solid-btn prof-sm-btn" id="prof-pw-save" type="button">Save</button>
+                </div>
+              </div>
+
+              <!-- Delete Account -->
+              <div class="prof-row prof-row--danger" id="prof-row-delete">
+                <span class="prof-row-icon">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+                    <path d="M3 6h14M8 6V4h4v2M5 6l1 11h8l1-11"/>
+                  </svg>
+                </span>
+                <div class="prof-row-body">
+                  <strong class="prof-danger-text">Delete Account</strong>
+                  <span class="prof-row-sub">Permanently delete your account</span>
+                </div>
+                <button class="prof-action-btn prof-action-btn--danger" id="prof-delete-account" type="button">Delete</button>
+              </div>
+            </div>
+
+            <div id="prof-not-signed-in" class="prof-not-signed-in hidden">
+              <p>You're not signed in. <button class="onb-link-btn" id="prof-signin-prompt" type="button">Sign in</button> to sync your documents and manage your account.</p>
+            </div>
+          </section>
+
+          <!-- Documents -->
+          <section class="prof-section">
+            <h2 class="prof-sec-title">Documents</h2>
+            <div id="prof-doc-rows" class="prof-doc-rows"></div>
+            <button class="prof-add-doc-btn" id="prof-add-doc" type="button">+ Add Document</button>
+          </section>
+
+          <!-- FAQ & Contact -->
+          <section class="prof-section">
+            <h2 class="prof-sec-title">FAQ &amp; Contact</h2>
+            <div class="prof-faq">
+              <details class="prof-faq-item">
+                <summary>How does visa data work?</summary>
+                <p>AeroLogic uses the open-source Passport Index dataset, refreshed every 12 hours. Data reflects general visa policies; always verify with the destination embassy before travel.</p>
+              </details>
+              <details class="prof-faq-item">
+                <summary>How accurate is the data?</summary>
+                <p>Visa policies change frequently. AeroLogic provides guidance only and does not constitute legal or travel advice. Verify requirements directly with embassies or consulates.</p>
+              </details>
+              <details class="prof-faq-item">
+                <summary>Can I add multiple travel documents?</summary>
+                <p>Yes. Use the Documents section above or the + button on the globe to add passports, visas, OCI cards, residence permits, and more. AeroLogic will show the best entry option across all your documents.</p>
+              </details>
+              <details class="prof-faq-item">
+                <summary>Is my data stored securely?</summary>
+                <p>Your account and documents are stored in Supabase with row-level security — only you can access your data. We never sell or share your information.</p>
+              </details>
+              <details class="prof-faq-item">
+                <summary>Contact</summary>
+                <p>For support or feedback, email <a href="mailto:support@aerologic.app" class="prof-link">support@aerologic.app</a>.</p>
+              </details>
+            </div>
+          </section>
+
+          <!-- Sign out -->
+          <div class="prof-signout-row" id="prof-signout-row">
+            <button class="prof-signout-btn" id="prof-signout" type="button">Sign out</button>
+          </div>
+        </main>
+
+        <footer class="onb-footer">
+          <span>© AeroLogic. All Rights Reserved.</span>
+        </footer>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
     <script src="app.js"></script>

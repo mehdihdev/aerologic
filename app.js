@@ -117,6 +117,63 @@ const VISA_GRANTS = {
 
 const DOCS_KEY = "aerologic-docs";
 const ONBOARDED_KEY = "aerologic-onboarded";
+const DEMO_DEFAULT_COUNTRY = "Germany";
+const DEMO_DESTINATIONS = ["Germany", "Japan", "India", "Brazil", "United Arab Emirates"];
+const DEMO_DOCUMENTS = Object.freeze([
+  { country: "United States", type: "Passport", expirationDate: null }
+]);
+
+// Initialized once config is fetched from /api/config
+let supabaseClient = null;
+
+async function initSupabase() {
+  try {
+    const config = await fetchJson("/api/config", 5000);
+    if (config?.supabaseUrl && config?.supabaseAnonKey && window.supabase) {
+      supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+    }
+  } catch {
+    // Supabase unavailable — fall back to localStorage-only mode
+  }
+}
+
+async function loadDocsFromSupabase(userId) {
+  if (!supabaseClient) return null;
+  const { data, error } = await supabaseClient
+    .from("travel_documents")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at");
+  if (error || !data) return null;
+  return data.map((row, i) => ({
+    id: i + 1,
+    country: row.country,
+    type: row.type,
+    expirationDate: row.expiration_date || null
+  }));
+}
+
+async function saveDocsToSupabase(userId, docs) {
+  if (!supabaseClient) return;
+  await supabaseClient.from("travel_documents").delete().eq("user_id", userId);
+  if (!docs.length) return;
+  await supabaseClient.from("travel_documents").insert(
+    docs.map((doc) => ({
+      user_id: userId,
+      country: doc.country,
+      type: doc.type,
+      expiration_date: doc.expirationDate || null
+    }))
+  );
+}
+
+async function syncDocsToSupabase() {
+  if (!supabaseClient) return;
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) await saveDocsToSupabase(session.user.id, state.documents);
+  } catch {}
+}
 
 function loadSavedDocuments() {
   try {
@@ -155,7 +212,9 @@ const state = {
   detailByCountry: new Map(),
   globe: null,
   loadingApiData: false,
-  refreshRunId: 0
+  refreshRunId: 0,
+  currentUser: null,  // Supabase user object when signed in
+  isDemoMode: false
 };
 
 const elements = {
@@ -238,14 +297,15 @@ function renderDocList() {
   elements.docList.innerHTML = state.documents
     .map((doc) => {
       const flag = getCountryFlag(doc.country);
+      const meta = state.isDemoMode ? `${doc.type} · Demo` : doc.type;
       return `
         <div class="doc-item">
           <div class="doc-flag">${flag}</div>
           <div class="doc-main">
             <strong>${doc.country}</strong>
-            <small>${doc.type}</small>
+            <small>${meta}</small>
           </div>
-          <button class="doc-remove" data-doc-id="${doc.id}" aria-label="Remove document">×</button>
+          ${state.isDemoMode ? "" : `<button class="doc-remove" data-doc-id="${doc.id}" aria-label="Remove document">×</button>`}
         </div>
       `;
     })
@@ -427,6 +487,20 @@ async function fetchJson(url, timeoutMs = 10000) {
   }
 }
 
+async function fetchWithRetry(url, timeoutMs = 10000, retries = 4) {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await fetchJson(url, timeoutMs);
+    } catch (err) {
+      if (attempt === retries - 1) throw err;
+      elements.globeLoading.querySelector("span.loading-spinner") && (
+        elements.globeLoading.lastChild.textContent = ` Retrying… (${attempt + 2}/${retries})`
+      );
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
+  }
+}
+
 async function refreshStatusesFromApi() {
   const runId = state.refreshRunId + 1;
   state.refreshRunId = runId;
@@ -551,6 +625,7 @@ function selectCountry(countryName, focus = true) {
   if (!state.countryByName.has(countryName)) return;
   state.selectedCountry = countryName;
   updateCountryPanel(countryName);
+  if (state.isDemoMode) syncLandingSearchValue(countryName);
   if (focus) centerOnCountry(countryName);
 }
 
@@ -610,7 +685,11 @@ function wireSearch() {
 
 function wireDocuments() {
   elements.addDocumentBtn.addEventListener("click", () => {
-    elements.docModal.showModal();
+    if (state.isDemoMode) {
+      startOnboardingFromLanding();
+      return;
+    }
+    openDocModalAdd();
   });
 
   elements.cancelDoc.addEventListener("click", () => elements.docModal.close());
@@ -620,114 +699,868 @@ function wireDocuments() {
 
   elements.docForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    state.documents.push({
-      id: state.nextDocId,
-      country: elements.docCountry.value,
-      type: elements.docType.value
-    });
-    state.nextDocId += 1;
+    const editId = document.getElementById("doc-edit-id").value;
+
+    if (editId) {
+      // Edit mode: update existing doc
+      const doc = state.documents.find((d) => d.id === Number(editId));
+      if (doc) {
+        doc.country = elements.docCountry.value;
+        doc.type    = elements.docType.value;
+      }
+    } else {
+      // Add mode: push new doc
+      state.documents.push({
+        id: state.nextDocId,
+        country: elements.docCountry.value,
+        type: elements.docType.value
+      });
+      state.nextDocId += 1;
+    }
+
     elements.docModal.close();
     renderDocList();
+    renderProfileDocs();
     saveDocuments(state.documents);
+    syncDocsToSupabase();
     await refreshStatusesFromApi();
   });
 
   elements.docList.addEventListener("click", async (event) => {
+    if (state.isDemoMode) return;
     const removeButton = event.target.closest("button[data-doc-id]");
     if (!removeButton) return;
     const docId = Number(removeButton.dataset.docId);
     state.documents = state.documents.filter((doc) => doc.id !== docId);
     renderDocList();
+    renderProfileDocs();
     saveDocuments(state.documents);
+    syncDocsToSupabase();
     await refreshStatusesFromApi();
   });
 }
 
-function wireOnboarding() {
-  const overlay = document.getElementById("onboarding");
-  const searchInput = document.getElementById("onboard-search");
-  const searchResults = document.getElementById("onboard-results");
-  const typeSelect = document.getElementById("onboard-type");
-  const docListEl = document.getElementById("onboard-doc-list");
-  const startBtn = document.getElementById("onboard-start");
-  const skipBtn = document.getElementById("onboard-skip");
+// Guards to prevent double-wiring
+let _searchWired = false, _documentsWired = false, _profileWired = false, _mainGlobeStarted = false;
+let _landingWired = false;
+let _landingSearchWired = false;
+let _onboardingWired = false;
+let _startingOnboarding = false;
+let _onboardingSource = null;
+let _onboardingMode = "signup";
+let _demoDestinationIndex = 1;
+let _resetOnboardingUI = null;
 
-  const allNames = state.countries.map((c) => c.name).sort((a, b) => a.localeCompare(b));
-  const tempDocs = [];
-  let tempNextId = 1;
+function getGlobeViewportConfig() {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+
+  if (!state.isDemoMode) {
+    return {
+      translate: [width / 2, height / 2],
+      scale: Math.min(width, height) * 0.42,
+      zoomLevel: null
+    };
+  }
+
+  const isHowView = document.body.classList.contains("demo-mode-how");
+  const isMobile = width <= 768;
+
+  if (isHowView) {
+    return {
+      translate: isMobile ? [width * 0.52, height * 0.8] : [width * 0.78, height * 0.57],
+      scale: Math.min(width, height) * (isMobile ? 0.54 : 0.61),
+      zoomLevel: 1
+    };
+  }
+
+  return {
+    translate: [width * 0.5, height * (isMobile ? 0.8 : 0.84)],
+    scale: Math.min(width, height) * (isMobile ? 0.56 : 0.58),
+    zoomLevel: 1
+  };
+}
+
+function updateGlobeViewportLayout() {
+  if (!state.globe?.applyViewportLayout) return;
+  state.globe.applyViewportLayout();
+}
+
+function syncLandingSearchValue(value = "") {
+  const input = document.getElementById("landing-country-search");
+  if (input) input.value = value;
+}
+
+function getDemoDocuments() {
+  return DEMO_DOCUMENTS.map((doc, index) => ({
+    id: index + 1,
+    country: doc.country,
+    type: doc.type,
+    expirationDate: doc.expirationDate
+  }));
+}
+
+function setLandingView(view) {
+  const isHowView = view === "how";
+  document.getElementById("landing-home-view")?.classList.toggle("hidden", isHowView);
+  document.getElementById("landing-how-view")?.classList.toggle("hidden", !isHowView);
+  document.getElementById("landing-tab-home")?.classList.toggle("landing-tab--active", !isHowView);
+  document.getElementById("landing-tab-how")?.classList.toggle("landing-tab--active", isHowView);
+  document.body.classList.toggle("demo-mode-how", state.isDemoMode && isHowView);
+  updateGlobeViewportLayout();
+  if (isHowView) {
+    const howContent = document.querySelector(".lhow-content");
+    if (howContent) howContent.scrollTop = 0;
+  }
+}
+
+function enterDemoMode() {
+  state.isDemoMode = true;
+  document.body.classList.add("demo-mode");
+  renderDocList();
+  renderProfileDocs();
+  setLandingView("home");
+  updateGlobeViewportLayout();
+  document.getElementById("landing").classList.remove("hidden");
+}
+
+function exitDemoMode({ clearDocuments = false } = {}) {
+  state.isDemoMode = false;
+  document.body.classList.remove("demo-mode", "demo-mode-how");
+  updateGlobeViewportLayout();
+  if (clearDocuments) {
+    state.documents = [];
+    state.nextDocId = 1;
+    renderDocList();
+    renderProfileDocs();
+  }
+}
+
+function seedDemoDocuments() {
+  _demoDestinationIndex = 1;
+  state.documents = getDemoDocuments();
+  state.nextDocId = state.documents.length + 1;
+  renderDocList();
+  renderProfileDocs();
+  syncLandingSearchValue("");
+}
+
+function focusNextDemoDestination() {
+  if (!state.isDemoMode) return;
+  const countryName = DEMO_DESTINATIONS[_demoDestinationIndex % DEMO_DESTINATIONS.length];
+  _demoDestinationIndex += 1;
+  setLandingView("home");
+  selectCountry(countryName, true);
+}
+
+function startOnboardingFromLanding() {
+  if (_startingOnboarding) return;
+  _startingOnboarding = true;
+  document.getElementById("landing").classList.add("hidden");
+  exitDemoMode({ clearDocuments: true });
+  showOnboarding("landing", "signup");
+}
+
+function wireLanding() {
+  if (_landingWired) return;
+  _landingWired = true;
+
+  document.getElementById("landing-brand")?.addEventListener("click", () => setLandingView("home"));
+  document.getElementById("landing-tab-home")?.addEventListener("click", () => setLandingView("home"));
+  document.getElementById("landing-tab-how")?.addEventListener("click", () => setLandingView("how"));
+
+  ["landing-signup", "landing-try-free", "landing-cta-btn"]
+    .forEach((id) => document.getElementById(id)?.addEventListener("click", startOnboardingFromLanding));
+  document.getElementById("landing-login")?.addEventListener("click", () => {
+    if (_startingOnboarding) return;
+    _startingOnboarding = true;
+    document.getElementById("landing").classList.add("hidden");
+    exitDemoMode({ clearDocuments: true });
+    showOnboarding("landing", "login");
+  });
+
+  wireLandingSearch();
+}
+
+function wireLandingSearch() {
+  if (_landingSearchWired) return;
+  _landingSearchWired = true;
+
+  const input = document.getElementById("landing-country-search");
+  const results = document.getElementById("landing-country-results");
+  if (!input || !results) return;
+
+  const allNames = state.countries
+    .map((country) => country.name)
+    .sort((a, b) => a.localeCompare(b));
 
   function renderResults(items) {
-    if (!items.length) { searchResults.classList.remove("show"); searchResults.innerHTML = ""; return; }
-    searchResults.innerHTML = items.map((n) => `<li data-name="${n}">${n}</li>`).join("");
-    searchResults.classList.add("show");
-  }
-
-  function renderChips() {
-    docListEl.innerHTML = tempDocs
-      .map((doc) => {
-        const flag = getCountryFlag(doc.country);
-        return `<div class="onboard-chip">
-          <span class="onboard-chip-flag">${flag}</span>
-          <span>${doc.country} · ${doc.type}</span>
-          <button class="onboard-chip-remove" data-id="${doc.id}" aria-label="Remove">×</button>
-        </div>`;
-      })
+    if (!items.length) {
+      results.classList.remove("show");
+      results.innerHTML = "";
+      return;
+    }
+    results.innerHTML = items
+      .map((name) => `<li data-country="${name}">${name}</li>`)
       .join("");
-    startBtn.disabled = tempDocs.length === 0;
+    results.classList.add("show");
   }
 
-  function addDoc(countryName) {
-    const type = typeSelect.value;
-    if (tempDocs.some((d) => d.country === countryName && d.type === type)) return;
-    tempDocs.push({ id: tempNextId++, country: countryName, type });
-    renderChips();
-    searchInput.value = "";
+  function commitSelection(countryName) {
+    if (!state.countryByName.has(countryName)) return;
+    setLandingView("home");
+    syncLandingSearchValue(countryName);
     renderResults([]);
+    selectCountry(countryName, true);
   }
 
-  searchInput.addEventListener("input", (e) => {
-    const q = e.target.value.trim().toLowerCase();
-    if (!q) { renderResults([]); return; }
-    renderResults(allNames.filter((n) => n.toLowerCase().includes(q)).slice(0, 10));
+  function findMatches(query) {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return [];
+    return allNames
+      .filter((name) => name.toLowerCase().includes(normalized))
+      .slice(0, 8);
+  }
+
+  input.addEventListener("input", (event) => {
+    renderResults(findMatches(event.target.value));
   });
 
-  searchInput.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    const first = searchResults.querySelector("li[data-name]");
-    if (!first) return;
-    e.preventDefault();
-    addDoc(first.dataset.name);
+  input.addEventListener("focus", (event) => {
+    renderResults(findMatches(event.target.value));
   });
 
-  searchInput.addEventListener("blur", () => setTimeout(() => renderResults([]), 120));
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
 
-  searchResults.addEventListener("click", (e) => {
-    const li = e.target.closest("li[data-name]");
-    if (li) addDoc(li.dataset.name);
+    const query = input.value.trim();
+    const exactMatch = allNames.find((name) => name.toLowerCase() === query.toLowerCase());
+    if (exactMatch) {
+      commitSelection(exactMatch);
+      return;
+    }
+
+    const first = results.querySelector("li[data-country]");
+    if (first) commitSelection(first.dataset.country);
   });
 
-  docListEl.addEventListener("click", (e) => {
+  input.addEventListener("blur", () => {
+    window.setTimeout(() => renderResults([]), 120);
+  });
+
+  results.addEventListener("click", (event) => {
+    const item = event.target.closest("li[data-country]");
+    if (!item) return;
+    commitSelection(item.dataset.country);
+  });
+}
+
+function showOnboarding(source = "landing", mode = "signup") {
+  _onboardingSource = source;
+  _onboardingMode = mode;
+  wireOnboarding();
+  document.body.classList.add("onboarding-open");
+  document.getElementById("onboarding").classList.remove("hidden");
+}
+
+async function returnToLandingFromOnboarding() {
+  if (supabaseClient) {
+    try {
+      await supabaseClient.auth.signOut();
+    } catch {}
+  }
+  state.currentUser = null;
+  setAvatarInitial(null);
+  localStorage.removeItem(ONBOARDED_KEY);
+  localStorage.removeItem(DOCS_KEY);
+  state.documents = [];
+  state.nextDocId = 1;
+  document.getElementById("onboarding").classList.add("hidden");
+  document.body.classList.remove("onboarding-open");
+  _onboardingSource = null;
+  _onboardingMode = "signup";
+  _startingOnboarding = false;
+  seedDemoDocuments();
+  renderDocList();
+  renderProfileDocs();
+  await refreshStatusesFromApi();
+  selectCountry(DEMO_DEFAULT_COUNTRY, true);
+  enterDemoMode();
+  wireLanding();
+}
+
+function setAvatarInitial(user) {
+  const initial = user
+    ? (user.user_metadata?.display_name || user.email || "?")[0].toUpperCase()
+    : null;
+
+  ["profile-btn", "prof-close-btn"].forEach((btnId) => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    const iconEl    = btn.querySelector("svg");
+    const initialEl = btn.querySelector(".avatar-initial");
+    if (!iconEl || !initialEl) return;
+    if (initial) {
+      iconEl.classList.add("hidden");
+      initialEl.textContent = initial;
+      initialEl.classList.remove("hidden");
+    } else {
+      iconEl.classList.remove("hidden");
+      initialEl.classList.add("hidden");
+    }
+  });
+
+  const lgEl = document.getElementById("prof-avatar-lg");
+  if (lgEl) {
+    if (initial) {
+      lgEl.innerHTML = initial;
+      lgEl.style.fontSize = "2.2rem";
+    } else {
+      lgEl.innerHTML = `<svg viewBox="0 0 20 20" fill="currentColor" width="36" height="36" aria-hidden="true"><path d="M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-6 8a6 6 0 0 1 12 0H4z"/></svg>`;
+    }
+  }
+}
+
+function renderProfileDocs() {
+  const container = document.getElementById("prof-doc-rows");
+  if (!container) return;
+  if (!state.documents.length) {
+    container.innerHTML = `<p style="font-size:13px;color:rgba(255,255,255,0.35);padding:14px 0;">No documents added yet.</p>`;
+    return;
+  }
+  container.innerHTML = state.documents.map((doc) => {
+    const code = resolveCountryCode(doc.country);
+    const flagHtml = code
+      ? `<img src="https://flagcdn.com/w40/${code.toLowerCase()}.png" class="prof-doc-flag-img" alt="${doc.country}" onerror="this.style.display='none'">`
+      : `<span class="prof-doc-flag-emoji">${getCountryFlag(doc.country)}</span>`;
+    return `<div class="prof-doc-row">
+      ${flagHtml}
+      <div class="prof-doc-body">
+        <strong>${doc.country}</strong>
+        <small>${doc.type}</small>
+      </div>
+      <button class="prof-edit-icon-btn" data-edit-id="${doc.id}" aria-label="Edit document" title="Edit">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+          <path d="M13.5 3.5a2.121 2.121 0 0 1 3 3L6 17l-4 1 1-4L13.5 3.5z"/>
+        </svg>
+      </button>
+    </div>`;
+  }).join("");
+}
+
+function openDocModalAdd() {
+  document.getElementById("doc-edit-id").value = "";
+  document.getElementById("doc-modal-title").textContent = "Add Document";
+  document.getElementById("doc-submit-btn").textContent = "Save Document";
+  document.getElementById("doc-country").value = "";
+  document.getElementById("doc-type").value = "Passport";
+  document.getElementById("doc-modal").showModal();
+}
+
+function openDocModalEdit(docId) {
+  const doc = state.documents.find((d) => d.id === docId);
+  if (!doc) return;
+  document.getElementById("doc-edit-id").value = String(docId);
+  document.getElementById("doc-modal-title").textContent = "Edit Document";
+  document.getElementById("doc-submit-btn").textContent = "Update Document";
+  document.getElementById("doc-country").value = doc.country;
+  document.getElementById("doc-type").value = doc.type;
+  document.getElementById("doc-modal").showModal();
+}
+
+function wireProfile() {
+  const overlay = document.getElementById("profile-overlay");
+  const profileBtn = document.getElementById("profile-btn");
+  const closeBtn = document.getElementById("prof-close-btn");
+
+  function openProfile() {
+    // Populate user info
+    const user = state.currentUser;
+    const isLoggedIn = Boolean(user);
+
+    document.getElementById("prof-account-rows").style.display  = isLoggedIn ? "" : "none";
+    document.getElementById("prof-not-signed-in").classList.toggle("hidden", isLoggedIn);
+    document.getElementById("prof-signout-row").style.display   = isLoggedIn ? "" : "none";
+
+    if (isLoggedIn) {
+      const name  = user.user_metadata?.display_name || "";
+      const email = user.email || "";
+      document.getElementById("prof-name-val").textContent  = name  || "—";
+      document.getElementById("prof-email-val").textContent = email || "—";
+    }
+
+    renderProfileDocs();
+    overlay.classList.remove("hidden");
+  }
+
+  function closeProfile() { overlay.classList.add("hidden"); }
+
+  profileBtn.addEventListener("click", openProfile);
+  closeBtn.addEventListener("click", closeProfile);
+
+  // Sign in prompt from profile (redirect to onboarding)
+  document.getElementById("prof-signin-prompt")?.addEventListener("click", () => {
+    closeProfile();
+    localStorage.removeItem(ONBOARDED_KEY);
+    showOnboarding("profile", "login");
+  });
+
+  // ── Inline edits ────────────────────────────────────
+
+  function toggleInlineEdit(rowId, editId, show) {
+    document.getElementById(rowId).style.display = show ? "none" : "";
+    document.getElementById(editId).classList.toggle("hidden", !show);
+  }
+
+  // Name
+  document.getElementById("prof-change-name").addEventListener("click", () => {
+    document.getElementById("prof-name-input").value =
+      state.currentUser?.user_metadata?.display_name || "";
+    toggleInlineEdit("prof-row-name", "prof-edit-name", true);
+  });
+  document.getElementById("prof-name-cancel").addEventListener("click", () =>
+    toggleInlineEdit("prof-row-name", "prof-edit-name", false)
+  );
+  document.getElementById("prof-name-save").addEventListener("click", async () => {
+    const val = document.getElementById("prof-name-input").value.trim();
+    const errEl = document.getElementById("prof-name-error");
+    if (!val) { errEl.textContent = "Name cannot be empty."; errEl.classList.remove("hidden"); return; }
+    errEl.classList.add("hidden");
+    if (supabaseClient) {
+      const { error } = await supabaseClient.auth.updateUser({ data: { display_name: val } });
+      if (error) { errEl.textContent = error.message; errEl.classList.remove("hidden"); return; }
+    }
+    if (state.currentUser) state.currentUser.user_metadata = { ...state.currentUser.user_metadata, display_name: val };
+    document.getElementById("prof-name-val").textContent = val;
+    setAvatarInitial(state.currentUser);
+    toggleInlineEdit("prof-row-name", "prof-edit-name", false);
+  });
+
+  // Email
+  document.getElementById("prof-change-email").addEventListener("click", () => {
+    document.getElementById("prof-email-input").value = state.currentUser?.email || "";
+    toggleInlineEdit("prof-row-email", "prof-edit-email", true);
+  });
+  document.getElementById("prof-email-cancel").addEventListener("click", () =>
+    toggleInlineEdit("prof-row-email", "prof-edit-email", false)
+  );
+  document.getElementById("prof-email-save").addEventListener("click", async () => {
+    const val = document.getElementById("prof-email-input").value.trim();
+    const errEl = document.getElementById("prof-email-error");
+    if (!val) { errEl.textContent = "Email cannot be empty."; errEl.classList.remove("hidden"); return; }
+    errEl.classList.add("hidden");
+    if (supabaseClient) {
+      const { error } = await supabaseClient.auth.updateUser({ email: val });
+      if (error) { errEl.textContent = error.message; errEl.classList.remove("hidden"); return; }
+    }
+    document.getElementById("prof-email-val").textContent = val;
+    toggleInlineEdit("prof-row-email", "prof-edit-email", false);
+  });
+
+  // Password
+  document.getElementById("prof-change-pw").addEventListener("click", () => {
+    document.getElementById("prof-pw-new").value = "";
+    document.getElementById("prof-pw-confirm").value = "";
+    toggleInlineEdit("prof-row-pw", "prof-edit-pw", true);
+  });
+  document.getElementById("prof-pw-cancel").addEventListener("click", () =>
+    toggleInlineEdit("prof-row-pw", "prof-edit-pw", false)
+  );
+  document.getElementById("prof-pw-save").addEventListener("click", async () => {
+    const pw      = document.getElementById("prof-pw-new").value;
+    const confirm = document.getElementById("prof-pw-confirm").value;
+    const errEl   = document.getElementById("prof-pw-error");
+    if (pw.length < 8 || !/[!@#$%^&*()\-_=+[\]{};':"\\|,.<>/?]/.test(pw)) {
+      errEl.textContent = "Password must be 8+ characters with a special character.";
+      errEl.classList.remove("hidden"); return;
+    }
+    if (pw !== confirm) {
+      errEl.textContent = "Passwords do not match.";
+      errEl.classList.remove("hidden"); return;
+    }
+    errEl.classList.add("hidden");
+    if (supabaseClient) {
+      const { error } = await supabaseClient.auth.updateUser({ password: pw });
+      if (error) { errEl.textContent = error.message; errEl.classList.remove("hidden"); return; }
+    }
+    toggleInlineEdit("prof-row-pw", "prof-edit-pw", false);
+  });
+
+  // Delete account
+  document.getElementById("prof-delete-account").addEventListener("click", async () => {
+    if (!confirm("Are you sure you want to delete your account? This cannot be undone.")) return;
+    if (supabaseClient) await supabaseClient.auth.signOut();
+    state.currentUser = null;
+    state.documents = [];
+    localStorage.clear();
+    setAvatarInitial(null);
+    closeProfile();
+    location.reload();
+  });
+
+  // ── Documents ────────────────────────────────────────
+
+  document.getElementById("prof-add-doc").addEventListener("click", () => {
+    closeProfile();
+    openDocModalAdd();
+  });
+
+  document.getElementById("prof-doc-rows").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-edit-id]");
+    if (!btn) return;
+    closeProfile();
+    openDocModalEdit(Number(btn.dataset.editId));
+  });
+
+  // ── Sign out ─────────────────────────────────────────
+
+  document.getElementById("prof-signout").addEventListener("click", async () => {
+    if (supabaseClient) await supabaseClient.auth.signOut();
+    localStorage.clear();
+    location.reload();
+  });
+}
+
+function wireOnboarding() {
+  if (_onboardingWired) {
+    _resetOnboardingUI?.();
+    return;
+  }
+  _onboardingWired = true;
+
+  const overlay   = document.getElementById("onboarding");
+  const s1        = document.getElementById("onb-s1");
+  const s1Login   = document.getElementById("onb-s1-login");
+  const s2        = document.getElementById("onb-s2");
+  const bar1      = document.getElementById("onb-bar-1");
+  const bar2      = document.getElementById("onb-bar-2");
+  const stepLabel = document.getElementById("onb-step-label");
+  const stepName  = document.getElementById("onb-step-name");
+  const s1Error   = document.getElementById("onb-s1-error");
+  const loginErr  = document.getElementById("onb-login-error");
+  const s2Error   = document.getElementById("onb-s2-error");
+  const titleEl   = overlay.querySelector(".onb-title");
+  const subtitleEl = overlay.querySelector(".onb-subtitle");
+  const progressRow = overlay.querySelector(".onb-progress-row");
+  const progressBar = overlay.querySelector(".onb-bar");
+  const countryEl = document.getElementById("onb-country");
+  const docGrid   = document.getElementById("onb-doc-grid");
+  const backBtn   = document.getElementById("onb-back-btn");
+  const wordmarkBtn = document.getElementById("onb-wordmark-btn");
+  const signupBtn = document.getElementById("onb-signup-btn");
+  const loginBtn  = document.getElementById("onb-login-btn");
+  const saveBtn   = document.getElementById("onb-save-btn");
+
+  let currentUser = null;
+  const pendingDocs = [];
+  let pendingNextId = 1;
+
+  // ── helpers ──────────────────────────────────────────
+
+  function showError(el, msg) {
+    el.textContent = msg;
+    el.classList.remove("hidden");
+  }
+
+  function hideError(el) { el.classList.add("hidden"); }
+
+  function closeOnboardingOverlay() {
+    overlay.classList.add("hidden");
+    document.body.classList.remove("onboarding-open");
+    _onboardingSource = null;
+    _onboardingMode = "signup";
+    _startingOnboarding = false;
+  }
+
+  function setCredentialMode(mode) {
+    const isLogin = mode === "login";
+    _onboardingMode = isLogin ? "login" : "signup";
+    s1.classList.toggle("hidden", isLogin);
+    s1Login.classList.toggle("hidden", !isLogin);
+    progressRow?.classList.toggle("hidden", isLogin);
+    progressBar?.classList.toggle("hidden", isLogin);
+
+    if (titleEl) {
+      titleEl.textContent = isLogin ? "Log In to AeroLogic" : "Get Started with AeroLogic";
+    }
+    if (subtitleEl) {
+      subtitleEl.textContent = isLogin
+        ? "Access your saved travel documents and continue where you left off."
+        : "Create an account or log in to manage your travel documents.";
+    }
+
+    if (isLogin) {
+      stepLabel.textContent = "Log in";
+      stepName.textContent = "Account access";
+      return;
+    }
+
+    stepLabel.textContent = "Step 1 of 2";
+    stepName.textContent = "Account Credentials";
+  }
+
+  function setStep2() {
+    setCredentialMode("signup");
+    s1.classList.add("hidden");
+    s1Login.classList.add("hidden");
+    s2.classList.remove("hidden");
+    bar2.classList.add("active");
+    stepLabel.textContent = "Step 2 of 2";
+    stepName.textContent  = "Add Travel Documents";
+  }
+
+  function flagHtml(countryName) {
+    const code = resolveCountryCode(countryName);
+    if (code) {
+      return `<img src="https://flagcdn.com/w40/${code.toLowerCase()}.png" class="onb-doc-flag-img" alt="${countryName}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'onb-doc-flag-emoji',textContent:'${getCountryFlag(countryName)}'}))">`;
+    }
+    return `<span class="onb-doc-flag-emoji">${getCountryFlag(countryName)}</span>`;
+  }
+
+  function renderDocGrid() {
+    docGrid.innerHTML = pendingDocs.map((doc) => `
+      <div class="onb-doc-card">
+        <button class="onb-doc-remove" data-id="${doc.id}" aria-label="Remove">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" width="9" height="9">
+            <path d="M5 5l10 10M15 5 5 15"/>
+          </svg>
+        </button>
+        ${flagHtml(doc.country)}
+        <div class="onb-doc-info">
+          <strong>${doc.country}</strong>
+          <small>${doc.type}</small>
+        </div>
+      </div>`).join("");
+  }
+
+  function resetStep2Form() {
+    countryEl.value = "";
+    document.getElementById("onb-doctype").value = "";
+    document.getElementById("onb-expiry").value = "";
+    hideError(s2Error);
+  }
+
+  function resetButtons() {
+    signupBtn.disabled = false;
+    signupBtn.textContent = "Sign up";
+    loginBtn.disabled = false;
+    loginBtn.textContent = "Log in";
+    saveBtn.disabled = false;
+    saveBtn.textContent = "Save and continue";
+  }
+
+  function resetOnboardingUI() {
+    const allNames = state.countries.map((c) => c.name).sort((a, b) => a.localeCompare(b));
+    countryEl.innerHTML = '<option value="">Select a country</option>' +
+      allNames.map((n) => `<option value="${n}">${n}</option>`).join("");
+
+    currentUser = null;
+    pendingDocs.length = 0;
+    pendingNextId = 1;
+
+    setCredentialMode(_onboardingMode);
+    s2.classList.add("hidden");
+    bar1.classList.add("active");
+    bar2.classList.remove("active");
+
+    document.getElementById("onb-name").value = "";
+    document.getElementById("onb-email").value = "";
+    document.getElementById("onb-password").value = "";
+    document.getElementById("onb-terms").checked = false;
+    document.getElementById("onb-login-email").value = "";
+    document.getElementById("onb-login-password").value = "";
+    resetStep2Form();
+    renderDocGrid();
+    hideError(s1Error);
+    hideError(loginErr);
+    hideError(s2Error);
+    resetButtons();
+
+    backBtn?.classList.toggle("hidden", _onboardingSource !== "landing");
+    wordmarkBtn?.classList.toggle("onb-wordmark-btn--interactive", _onboardingSource === "landing");
+  }
+
+  _resetOnboardingUI = resetOnboardingUI;
+
+  function addPendingDoc() {
+    const country = countryEl.value;
+    const type    = document.getElementById("onb-doctype").value;
+    if (!country || !type) {
+      showError(s2Error, "Please select a country and document type.");
+      return false;
+    }
+    if (pendingDocs.some((d) => d.country === country && d.type === type)) {
+      showError(s2Error, "This document is already added.");
+      return false;
+    }
+    hideError(s2Error);
+    const expiry = document.getElementById("onb-expiry").value || null;
+    pendingDocs.push({ id: pendingNextId++, country, type, expirationDate: expiry });
+    renderDocGrid();
+    resetStep2Form();
+    return true;
+  }
+
+  async function finishOnboarding() {
+    state.documents  = pendingDocs.map((d, i) => ({ ...d, id: i + 1 }));
+    state.nextDocId  = state.documents.length + 1;
+    saveDocuments(state.documents);
+    localStorage.setItem(ONBOARDED_KEY, "1");
+    if (supabaseClient && currentUser) {
+      await saveDocsToSupabase(currentUser.id, state.documents);
+    }
+    closeOnboardingOverlay();
+    renderDocList();
+    renderProfileDocs();
+    await refreshStatusesFromApi();
+  }
+
+  backBtn?.addEventListener("click", async () => {
+    if (_onboardingSource !== "landing") return;
+    await returnToLandingFromOnboarding();
+  });
+
+  wordmarkBtn?.addEventListener("click", async () => {
+    if (_onboardingSource !== "landing") return;
+    await returnToLandingFromOnboarding();
+  });
+
+  // ── Step 1: Sign-up ───────────────────────────────────
+
+  signupBtn.addEventListener("click", async () => {
+    const name     = document.getElementById("onb-name").value.trim();
+    const email    = document.getElementById("onb-email").value.trim();
+    const password = document.getElementById("onb-password").value;
+    const terms    = document.getElementById("onb-terms").checked;
+    hideError(s1Error);
+
+    if (!name || !email || !password) {
+      showError(s1Error, "Please fill in all fields.");
+      return;
+    }
+    if (!terms) {
+      showError(s1Error, "Please accept the terms to continue.");
+      return;
+    }
+    if (password.length < 8 || !/[!@#$%^&*()\-_=+[\]{};':"\\|,.<>/?]/.test(password)) {
+      showError(s1Error, "Password must be at least 8 characters and contain a special character.");
+      return;
+    }
+
+    signupBtn.disabled = true;
+    signupBtn.textContent = "Creating account…";
+
+    if (supabaseClient) {
+      const { data, error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: { data: { display_name: name } }
+      });
+      if (error) {
+        showError(s1Error, error.message);
+        resetButtons();
+        return;
+      }
+      currentUser = data.user;
+      state.currentUser = data.user;
+      setAvatarInitial(data.user);
+    }
+
+    resetButtons();
+    setStep2();
+  });
+
+  // ── Step 1: toggle to log in ──────────────────────────
+
+  document.getElementById("onb-to-login").addEventListener("click", () => {
+    setCredentialMode("login");
+  });
+
+  document.getElementById("onb-to-signup").addEventListener("click", () => {
+    setCredentialMode("signup");
+  });
+
+  loginBtn.addEventListener("click", async () => {
+    const email    = document.getElementById("onb-login-email").value.trim();
+    const password = document.getElementById("onb-login-password").value;
+    hideError(loginErr);
+
+    if (!email || !password) {
+      showError(loginErr, "Please enter your email and password.");
+      return;
+    }
+
+    loginBtn.disabled = true;
+    loginBtn.textContent = "Logging in…";
+
+    if (!supabaseClient) {
+      showError(loginErr, "Log in is unavailable right now.");
+      resetButtons();
+      return;
+    }
+
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) {
+      showError(loginErr, error.message);
+      resetButtons();
+      return;
+    }
+
+    currentUser = data.user;
+    state.currentUser = data.user;
+    setAvatarInitial(data.user);
+
+    const docs = await loadDocsFromSupabase(data.user.id);
+    const saved = loadSavedDocuments();
+
+    if (Array.isArray(docs)) {
+      state.documents = docs;
+      state.nextDocId = docs.length + 1;
+    } else if (saved && saved.length > 0) {
+      state.documents = saved;
+      state.nextDocId = Math.max(...saved.map((d) => d.id)) + 1;
+    } else {
+      state.documents = [];
+      state.nextDocId = 1;
+    }
+
+    saveDocuments(state.documents);
+    localStorage.setItem(ONBOARDED_KEY, "1");
+    closeOnboardingOverlay();
+    renderDocList();
+    renderProfileDocs();
+    await refreshStatusesFromApi();
+  });
+
+  // ── Step 2: Add documents ─────────────────────────────
+
+  document.getElementById("onb-add-btn").addEventListener("click", addPendingDoc);
+
+  docGrid.addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-id]");
     if (!btn) return;
     const id = Number(btn.dataset.id);
-    tempDocs.splice(tempDocs.findIndex((d) => d.id === id), 1);
-    renderChips();
+    const idx = pendingDocs.findIndex((d) => d.id === id);
+    if (idx !== -1) { pendingDocs.splice(idx, 1); renderDocGrid(); }
   });
 
-  startBtn.addEventListener("click", () => {
-    state.documents = [...tempDocs];
-    state.nextDocId = tempNextId;
-    saveDocuments(state.documents);
-    localStorage.setItem(ONBOARDED_KEY, "1");
-    overlay.classList.add("hidden");
-    renderDocList();
-    refreshStatusesFromApi();
+  saveBtn.addEventListener("click", async () => {
+    // Auto-add current form values if filled
+    const country = countryEl.value;
+    const type    = document.getElementById("onb-doctype").value;
+    if (country && type && !addPendingDoc()) return;
+    if (!pendingDocs.length) {
+      showError(s2Error, "Add at least one travel document to continue.");
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+    await finishOnboarding();
   });
 
-  skipBtn.addEventListener("click", () => {
-    localStorage.setItem(ONBOARDED_KEY, "1");
-    overlay.classList.add("hidden");
-  });
+  resetOnboardingUI();
 }
 
 function initGlobe() {
@@ -756,6 +1589,16 @@ function initGlobe() {
     projection.scale(state.globe.baseScale * state.globe.zoomLevel);
   }
 
+  function applyViewportLayout() {
+    const { translate, scale, zoomLevel } = getGlobeViewportConfig();
+    state.globe.baseScale = scale;
+    projection.translate(translate);
+    if (Number.isFinite(zoomLevel)) state.globe.zoomLevel = zoomLevel;
+    applyZoom();
+  }
+
+  state.globe.applyViewportLayout = applyViewportLayout;
+
   function resize() {
     const width = window.innerWidth;
     const height = window.innerHeight;
@@ -765,9 +1608,7 @@ function initGlobe() {
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    state.globe.baseScale = Math.min(width, height) * 0.42;
-    projection.translate([width / 2, height / 2]);
-    applyZoom();
+    applyViewportLayout();
   }
 
   resize();
@@ -776,6 +1617,7 @@ function initGlobe() {
   // Scroll-wheel zoom
   canvas.addEventListener("wheel", (event) => {
     event.preventDefault();
+    if (state.isDemoMode) return;
     const factor = event.deltaY < 0 ? 1.08 : 0.93;
     state.globe.zoomLevel = clamp(state.globe.zoomLevel * factor, 0.5, 12);
     applyZoom();
@@ -800,6 +1642,7 @@ function initGlobe() {
 
   canvas.addEventListener("touchmove", (event) => {
     if (event.touches.length !== 2 || pinchStartDist === null) return;
+    if (state.isDemoMode) return;
     event.preventDefault();
     const dist = Math.hypot(
       event.touches[0].clientX - event.touches[1].clientX,
@@ -1044,7 +1887,7 @@ function drawFrame(timestamp) {
 }
 
 async function loadCountryMetadata() {
-  const list = await fetchJson(COUNTRY_API_URL, 6000);
+  const list = await fetchWithRetry(COUNTRY_API_URL, 8000, 4);
   list.forEach((country) => {
     const common = country?.name?.common;
     const code = country?.cca2;
@@ -1075,25 +1918,67 @@ function buildCountries(topology) {
   state.countryByName = new Map(state.countries.map((country) => [country.name, country]));
 }
 
+async function initMainApp(topology, options = {}) {
+  const { hideLoading = true, defaultCountry = "Germany" } = options;
+  buildCountries(topology);
+  populateCountrySelect();
+  initDefaultStatuses();
+  updateCountryPanel(null);
+  initGlobe();
+  if (!_searchWired)    { _searchWired    = true; wireSearch(); }
+  if (!_documentsWired) { _documentsWired = true; wireDocuments(); }
+  if (!_profileWired)   { _profileWired   = true; wireProfile(); }
+  if (defaultCountry) selectCountry(defaultCountry, true);
+  if (hideLoading) elements.globeLoading.classList.add("hidden");
+  if (!_mainGlobeStarted) {
+    _mainGlobeStarted = true;
+    requestAnimationFrame(drawFrame);
+  }
+}
+
 async function init() {
   try {
-    const [topology] = await Promise.all([
-      fetchJson(GEOJSON_URL),
-      loadCountryMetadata().catch((err) => console.warn("Country metadata unavailable:", err))
-    ]);
-    buildCountries(topology);
-    populateCountrySelect();
-    initDefaultStatuses();
-    updateCountryPanel(null);
-    initGlobe();
-    wireSearch();
-    wireDocuments();
-    selectCountry("Germany", true);
-    elements.globeLoading.classList.add("hidden");
-    requestAnimationFrame(drawFrame);
+    // Start all fetches in parallel immediately
+    const topologyPromise = fetchJson(GEOJSON_URL);
+    const metadataPromise = loadCountryMetadata();
 
+    await initSupabase();
+
+    // ── Returning authenticated user ──────────────────
+    if (supabaseClient) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (session) {
+        const [topology] = await Promise.all([topologyPromise, metadataPromise]);
+        await initMainApp(topology);
+
+        state.currentUser = session.user;
+        setAvatarInitial(session.user);
+
+        const docs = await loadDocsFromSupabase(session.user.id);
+        if (docs && docs.length > 0) {
+          state.documents = docs;
+          state.nextDocId = docs.length + 1;
+          saveDocuments(state.documents);
+        } else {
+          const saved = loadSavedDocuments();
+          if (saved && saved.length > 0) {
+            state.documents = saved;
+            state.nextDocId = Math.max(...saved.map((d) => d.id)) + 1;
+          }
+        }
+        localStorage.setItem(ONBOARDED_KEY, "1");
+        renderDocList();
+        await refreshStatusesFromApi();
+        return;
+      }
+    }
+
+    // ── Previously onboarded (localStorage) ──────────
     const isOnboarded = localStorage.getItem(ONBOARDED_KEY);
     if (isOnboarded) {
+      const [topology] = await Promise.all([topologyPromise, metadataPromise]);
+      await initMainApp(topology);
+
       const saved = loadSavedDocuments();
       if (saved && saved.length > 0) {
         state.documents = saved;
@@ -1101,10 +1986,20 @@ async function init() {
       }
       renderDocList();
       await refreshStatusesFromApi();
-    } else {
-      wireOnboarding();
-      document.getElementById("onboarding").classList.remove("hidden");
+      return;
     }
+
+    // ── New user → start live demo with a seeded US passport ──
+    const [topology] = await Promise.all([topologyPromise, metadataPromise]);
+    await initMainApp(topology, { hideLoading: false, defaultCountry: DEMO_DEFAULT_COUNTRY });
+
+    seedDemoDocuments();
+    await refreshStatusesFromApi();
+    selectCountry(DEMO_DEFAULT_COUNTRY, true);
+    enterDemoMode();
+    wireLanding();
+    elements.globeLoading.classList.add("hidden");
+
   } catch (error) {
     elements.globeLoading.textContent = `Could not initialize: ${error?.message || error}`;
   }
