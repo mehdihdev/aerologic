@@ -22,7 +22,7 @@
 
     <!-- Top navigation bar -->
     <header class="nav">
-      <div class="nav-brand">AeroLogic</div>
+      <div class="nav-brand"><img src="/logobig.png" alt="AeroLogic" class="logo-img" /></div>
       <div class="nav-search">
         <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="9" cy="9" r="6" />
@@ -43,10 +43,7 @@
           <span id="global-status" class="status-text">Visa Intelligence</span>
         </div>
         <button id="profile-btn" class="avatar-btn" type="button" aria-label="Open profile">
-          <svg id="profile-btn-icon" viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
-            <path d="M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-6 8a6 6 0 0 1 12 0H4z"/>
-          </svg>
-          <span id="profile-btn-initial" class="avatar-initial hidden"></span>
+          <span id="profile-btn-initial" class="avatar-initial">?</span>
         </button>
       </div>
     </header>
@@ -77,18 +74,22 @@
         <h3 id="country-name">Select a country</h3>
       </div>
       <div id="entry-pill" class="entry-pill neutral">Choose a destination on the globe</div>
-      <div class="req-grid">
-        <div class="req-item">
+      <div class="req-table">
+        <div class="req-row">
           <span class="req-label">Visa</span>
           <span id="req-visa" class="req-value">—</span>
         </div>
-        <div class="req-item">
-          <span class="req-label">Validity</span>
+        <div class="req-row">
+          <span class="req-label">Passport Validity</span>
           <span id="req-validity" class="req-value">—</span>
         </div>
-        <div class="req-item">
-          <span class="req-label">Stay</span>
+        <div class="req-row">
+          <span class="req-label">Allowed Stay</span>
           <span id="req-stay" class="req-value">—</span>
+        </div>
+        <div class="req-row">
+          <span class="req-label">Entry Limit</span>
+          <span id="req-entry-limit" class="req-value">—</span>
         </div>
       </div>
       <p id="country-explainer" class="explainer">Add travel documents and click a country to see requirements.</p>
@@ -99,7 +100,7 @@
 
       <!-- Shared nav -->
       <nav class="landing-nav">
-        <button class="landing-brand" id="landing-brand" type="button">aerologic</button>
+        <button class="landing-brand" id="landing-brand" type="button"><img src="/logobig.png" alt="AeroLogic" class="logo-img" /></button>
         <div class="landing-nav-tabs">
           <button class="landing-tab landing-tab--active" id="landing-tab-home" type="button">Home</button>
           <button class="landing-tab" id="landing-tab-how" type="button">How it Works</button>
@@ -224,8 +225,8 @@
     <div id="onboarding" class="onboarding hidden">
       <div class="onb-page">
         <header class="onb-header">
-          <button id="onb-wordmark-btn" class="onb-wordmark onb-wordmark-btn" type="button">aerologic</button>
-          <button id="onb-back-btn" class="onb-back-btn hidden" type="button">Back to landing</button>
+          <button id="onb-wordmark-btn" class="onb-wordmark onb-wordmark-btn" type="button"><img src="/logobig.png" alt="AeroLogic" class="logo-img" /></button>
+          <button id="onb-back-btn" class="onb-back-btn" type="button">← Back</button>
         </header>
         <div class="onb-rule"></div>
 
@@ -291,10 +292,6 @@
                     <option value="">Select a document</option>
                     <option value="Passport">Passport</option>
                     <option value="Visa">Visa</option>
-                    <option value="Permanent Resident">Permanent Resident</option>
-                    <option value="OCI Card">OCI Card</option>
-                    <option value="Residence Permit">Residence Permit</option>
-                    <option value="ID Card">ID Card</option>
                   </select>
                   <svg class="onb-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M5 8l5 5 5-5"/>
@@ -351,11 +348,11 @@
           <select id="doc-type" required>
             <option value="Passport">Passport</option>
             <option value="Visa">Visa</option>
-            <option value="Permanent Resident">Permanent Resident</option>
-            <option value="OCI Card">OCI Card</option>
-            <option value="Residence Permit">Residence Permit</option>
-            <option value="ID Card">ID Card</option>
           </select>
+        </label>
+        <label class="field">
+          <span>Expiration Date <span class="field-optional">(optional)</span></span>
+          <input type="date" id="doc-expiry" class="field-date" />
         </label>
         <div class="modal-actions">
           <button type="button" class="ghost-btn" id="cancel-doc-footer">Cancel</button>
@@ -368,24 +365,20 @@
     <div id="profile-overlay" class="profile-overlay hidden">
       <div class="onb-page">
         <header class="onb-header prof-header">
-          <span class="onb-wordmark">aerologic</span>
-          <button id="prof-close-btn" class="avatar-btn" type="button" aria-label="Close profile">
-            <svg id="prof-close-icon" viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
-              <path d="M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-6 8a6 6 0 0 1 12 0H4z"/>
-            </svg>
-            <span id="prof-close-initial" class="avatar-initial hidden"></span>
-          </button>
+          <button id="prof-wordmark-btn" class="onb-wordmark onb-wordmark-btn onb-wordmark-btn--interactive" type="button"><img src="/logobig.png" alt="AeroLogic" class="logo-img" /></button>
+          <div class="prof-header-right">
+            <button id="prof-back-btn" class="onb-back-btn" type="button">← Back</button>
+            <button id="prof-close-btn" class="avatar-btn" type="button" aria-label="Close settings">
+              <span id="prof-close-initial" class="avatar-initial">?</span>
+            </button>
+          </div>
         </header>
         <div class="onb-rule"></div>
 
         <main class="prof-main">
           <!-- Hero row -->
           <div class="prof-hero">
-            <div class="avatar-lg" id="prof-avatar-lg">
-              <svg viewBox="0 0 20 20" fill="currentColor" width="36" height="36" aria-hidden="true">
-                <path d="M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-6 8a6 6 0 0 1 12 0H4z"/>
-              </svg>
-            </div>
+            <div class="avatar-lg" id="prof-avatar-lg">?</div>
             <div>
               <h1 class="prof-page-title">Settings</h1>
               <p class="prof-page-sub">Manage your account and preferences</p>
@@ -395,6 +388,23 @@
           <!-- Account & Security -->
           <section class="prof-section">
             <h2 class="prof-sec-title">Account &amp; Security</h2>
+
+            <!-- Profile color — visible for all users -->
+            <div class="prof-row" id="prof-row-color">
+              <span class="prof-row-icon">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+                  <circle cx="10" cy="10" r="7"/>
+                  <circle cx="7.5" cy="8.5" r="1.5" fill="currentColor" stroke="none"/>
+                  <circle cx="12.5" cy="8.5" r="1.5" fill="currentColor" stroke="none"/>
+                  <circle cx="10" cy="13" r="1.5" fill="currentColor" stroke="none"/>
+                </svg>
+              </span>
+              <div class="prof-row-body">
+                <strong>Profile Color</strong>
+              </div>
+              <div class="prof-color-swatches" id="prof-color-swatches"></div>
+            </div>
+
             <div id="prof-account-rows">
 
               <!-- Name -->

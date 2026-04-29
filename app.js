@@ -117,6 +117,18 @@ const VISA_GRANTS = {
 
 const DOCS_KEY = "aerologic-docs";
 const ONBOARDED_KEY = "aerologic-onboarded";
+const AVATAR_COLOR_KEY = "aerologic-avatar-color";
+
+const AVATAR_COLORS = [
+  "#4b8fff", // blue
+  "#20c97a", // green
+  "#f6ac23", // amber
+  "#f84f70", // rose
+  "#a855f7", // purple
+  "#14b8a6", // teal
+  "#f97316", // orange
+  "#8a6262", // muted rose (default)
+];
 const DEMO_DEFAULT_COUNTRY = "Germany";
 const DEMO_DESTINATIONS = ["Germany", "Japan", "India", "Brazil", "United Arab Emirates"];
 const DEMO_DOCUMENTS = Object.freeze([
@@ -126,49 +138,98 @@ const DEMO_DOCUMENTS = Object.freeze([
 // Initialized once config is fetched from /api/config
 let supabaseClient = null;
 
+// Set to false when the travel_documents table is confirmed missing so we stop
+// hitting Supabase and generating repeated 404s in the console.
+let _supabaseDocsAvailable = true;
+
+const _SB_CONFIG_KEY = "aerologic-sb-cfg";
+
+function _createSupabaseClient(url, key) {
+  if (!url || !key || !window.supabase) return null;
+  return window.supabase.createClient(url, key);
+}
+
 async function initSupabase() {
+  // Use the cached config immediately so session detection is instant on
+  // subsequent loads — this prevents Vercel cold-start delays on /api/config
+  // from causing a logged-in user to be incorrectly routed to the landing page.
   try {
-    const config = await fetchJson("/api/config", 5000);
-    if (config?.supabaseUrl && config?.supabaseAnonKey && window.supabase) {
-      supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+    const cached = JSON.parse(localStorage.getItem(_SB_CONFIG_KEY) || "null");
+    if (cached?.url && cached?.key) {
+      supabaseClient = _createSupabaseClient(cached.url, cached.key);
+    }
+  } catch {}
+
+  // Fetch fresh config from the server (updates the cache for next load)
+  try {
+    const config = await fetchJson("/api/config", 8000);
+    if (config?.supabaseUrl && config?.supabaseAnonKey) {
+      localStorage.setItem(_SB_CONFIG_KEY, JSON.stringify({
+        url: config.supabaseUrl,
+        key: config.supabaseAnonKey
+      }));
+      if (!supabaseClient) {
+        supabaseClient = _createSupabaseClient(config.supabaseUrl, config.supabaseAnonKey);
+      }
     }
   } catch {
-    // Supabase unavailable — fall back to localStorage-only mode
+    // If the fetch fails, the cached client (if any) is still active
   }
 }
 
 async function loadDocsFromSupabase(userId) {
-  if (!supabaseClient) return null;
-  const { data, error } = await supabaseClient
-    .from("travel_documents")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at");
-  if (error || !data) return null;
-  return data.map((row, i) => ({
-    id: i + 1,
-    country: row.country,
-    type: row.type,
-    expirationDate: row.expiration_date || null
-  }));
+  if (!supabaseClient || !_supabaseDocsAvailable) return null;
+  try {
+    const { data, error } = await supabaseClient
+      .from("travel_documents")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at");
+    if (error) {
+      // 42P01 = undefined_table; treat any 404-class error as "table missing"
+      if (error.code === "42P01" || error.message?.includes("does not exist")) {
+        _supabaseDocsAvailable = false;
+        console.warn(
+          "AeroLogic: the travel_documents table was not found in Supabase. " +
+          "Run the setup SQL from the project README to enable cloud sync. " +
+          "Falling back to localStorage."
+        );
+      }
+      return null;
+    }
+    _supabaseDocsAvailable = true;
+    if (!data) return null;
+    return data.map((row, i) => ({
+      id: i + 1,
+      country: row.country,
+      type: row.type,
+      expirationDate: row.expiration_date || null
+    }));
+  } catch {
+    return null;
+  }
 }
 
 async function saveDocsToSupabase(userId, docs) {
-  if (!supabaseClient) return;
-  await supabaseClient.from("travel_documents").delete().eq("user_id", userId);
-  if (!docs.length) return;
-  await supabaseClient.from("travel_documents").insert(
-    docs.map((doc) => ({
-      user_id: userId,
-      country: doc.country,
-      type: doc.type,
-      expiration_date: doc.expirationDate || null
-    }))
-  );
+  if (!supabaseClient || !_supabaseDocsAvailable) return;
+  try {
+    await supabaseClient.from("travel_documents").delete().eq("user_id", userId);
+    if (!docs.length) return;
+    await supabaseClient.from("travel_documents").insert(
+      docs.map((doc) => ({
+        user_id: userId,
+        country: doc.country,
+        type: doc.type,
+        expiration_date: doc.expirationDate || null
+      }))
+    );
+  } catch {
+    // silently ignore — localStorage is the source of truth when Supabase is unavailable
+  }
 }
 
 async function syncDocsToSupabase() {
-  if (!supabaseClient) return;
+  if (!supabaseClient || !_supabaseDocsAvailable) return;
   try {
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session) await saveDocsToSupabase(session.user.id, state.documents);
@@ -227,6 +288,7 @@ const elements = {
   docForm: document.getElementById("doc-form"),
   docCountry: document.getElementById("doc-country"),
   docType: document.getElementById("doc-type"),
+  docExpiry: document.getElementById("doc-expiry"),
   cancelDoc: document.getElementById("cancel-doc"),
   countrySearch: document.getElementById("country-search"),
   searchResults: document.getElementById("search-results"),
@@ -236,8 +298,18 @@ const elements = {
   reqVisa: document.getElementById("req-visa"),
   reqValidity: document.getElementById("req-validity"),
   reqStay: document.getElementById("req-stay"),
+  reqEntryLimit: document.getElementById("req-entry-limit"),
   countryExplainer: document.getElementById("country-explainer")
 };
+
+function isExpiringWithin6Months(dateStr) {
+  if (!dateStr) return false;
+  const expiry = new Date(dateStr + "T00:00:00");
+  const now = new Date();
+  const sixMonths = new Date();
+  sixMonths.setMonth(sixMonths.getMonth() + 6);
+  return expiry > now && expiry <= sixMonths;
+}
 
 function normalizeName(name) {
   return name
@@ -298,18 +370,30 @@ function renderDocList() {
     .map((doc) => {
       const flag = getCountryFlag(doc.country);
       const meta = state.isDemoMode ? `${doc.type} · Demo` : doc.type;
+      const warn = isExpiringWithin6Months(doc.expirationDate);
       return `
-        <div class="doc-item">
+        <div class="doc-item${warn ? " doc-item--expiry-warn" : ""}">
           <div class="doc-flag">${flag}</div>
           <div class="doc-main">
             <strong>${doc.country}</strong>
             <small>${meta}</small>
+            ${warn ? `<span class="doc-expiry-warn">⚠ Expiring soon — some countries require 6+ months validity</span>` : ""}
           </div>
           ${state.isDemoMode ? "" : `<button class="doc-remove" data-doc-id="${doc.id}" aria-label="Remove document">×</button>`}
         </div>
       `;
     })
     .join("");
+}
+
+function deriveEntryLimit(status) {
+  switch (status) {
+    case STATUS.VISA_FREE:  return "Multiple Entry";
+    case STATUS.EVISA:      return "Single Entry";
+    case STATUS.VOA:        return "Single Entry";
+    case STATUS.TRAVEL_BAN: return "N/A";
+    default:                return "Varies";
+  }
 }
 
 function countryDetailsFromRecord(status, countryName) {
@@ -319,6 +403,7 @@ function countryDetailsFromRecord(status, countryName) {
       visa: status === STATUS.VISA_FREE ? "Not Required" : "Visa Required",
       validity: "Check source",
       stay: "Varies",
+      entryLimit: "Varies",
       explanation: "Visa data unavailable right now. Try again in a moment."
     };
   }
@@ -328,6 +413,7 @@ function countryDetailsFromRecord(status, countryName) {
       visa: "Not Required",
       validity: "N/A",
       stay: "Resident Access",
+      entryLimit: "Unlimited",
       explanation: `Entry cleared — you hold a ${detail.documentType} for this country.`
     };
   }
@@ -338,6 +424,7 @@ function countryDetailsFromRecord(status, countryName) {
       visa: "Not Required",
       validity: "Must be valid",
       stay: Number.isFinite(dur) ? `${dur} days` : "Varies",
+      entryLimit: "Multiple Entry",
       explanation: `Access granted because you hold a ${detail.grantingType} from ${detail.grantingCountry}. This country accepts it in lieu of a separate visa. Always verify current rules before travel.`
     };
   }
@@ -345,19 +432,18 @@ function countryDetailsFromRecord(status, countryName) {
   const dur = detail.durationDays;
   const stayCopy = Number.isFinite(dur) ? `${dur} days` : "Varies";
   const validity =
-    status === STATUS.VISA_FREE
-      ? "3+ months"
-      : status === STATUS.TRAVEL_BAN
-        ? "N/A"
-        : "6+ months";
-  const sourcePassport = detail.passport?.name || "selected passport";
+    status === STATUS.VISA_FREE  ? "3+ months on arrival" :
+    status === STATUS.TRAVEL_BAN ? "N/A" :
+                                   "6+ months on arrival";
+  const sourcePassport = detail.passport?.name || "your passport";
   const sourceVisa = detail.visa || "Visa Required";
 
   return {
     visa: sourceVisa,
     validity,
-    stay: status === STATUS.TRAVEL_BAN ? "Banned" : stayCopy,
-    explanation: `Based on visa data for ${sourcePassport} entering ${countryName}. Verify with destination embassy before travel.`
+    stay: status === STATUS.TRAVEL_BAN ? "Not Permitted" : stayCopy,
+    entryLimit: deriveEntryLimit(status),
+    explanation: `Based on visa data for ${sourcePassport} entering ${countryName}. Always verify current requirements with the destination embassy before travel.`
   };
 }
 
@@ -370,6 +456,7 @@ function updateCountryPanel(countryName) {
     elements.reqVisa.textContent = "—";
     elements.reqValidity.textContent = "—";
     elements.reqStay.textContent = "—";
+    elements.reqEntryLimit.textContent = "—";
     elements.countryExplainer.textContent =
       "Add travel documents and click a country to see entry requirements.";
     return;
@@ -385,6 +472,7 @@ function updateCountryPanel(countryName) {
   elements.reqVisa.textContent = details.visa;
   elements.reqValidity.textContent = details.validity;
   elements.reqStay.textContent = details.stay;
+  elements.reqEntryLimit.textContent = details.entryLimit;
   elements.countryExplainer.textContent = details.explanation;
 }
 
@@ -700,20 +788,23 @@ function wireDocuments() {
   elements.docForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const editId = document.getElementById("doc-edit-id").value;
+    const expiry = elements.docExpiry.value || null;
 
     if (editId) {
       // Edit mode: update existing doc
       const doc = state.documents.find((d) => d.id === Number(editId));
       if (doc) {
-        doc.country = elements.docCountry.value;
-        doc.type    = elements.docType.value;
+        doc.country        = elements.docCountry.value;
+        doc.type           = elements.docType.value;
+        doc.expirationDate = expiry;
       }
     } else {
       // Add mode: push new doc
       state.documents.push({
         id: state.nextDocId,
         country: elements.docCountry.value,
-        type: elements.docType.value
+        type: elements.docType.value,
+        expirationDate: expiry
       });
       state.nextDocId += 1;
     }
@@ -965,10 +1056,17 @@ function showOnboarding(source = "landing", mode = "signup") {
 }
 
 async function returnToLandingFromOnboarding() {
+  // Hide onboarding and immediately surface the landing overlay so there is
+  // no gap where the naked globe is visible during async cleanup.
+  document.getElementById("onboarding").classList.add("hidden");
+  document.body.classList.remove("onboarding-open");
+  document.getElementById("landing").classList.remove("hidden");
+  document.body.classList.add("demo-mode");
+  setLandingView("home");
+
+  // Async cleanup — landing is already covering the globe
   if (supabaseClient) {
-    try {
-      await supabaseClient.auth.signOut();
-    } catch {}
+    try { await supabaseClient.auth.signOut(); } catch {}
   }
   state.currentUser = null;
   setAvatarInitial(null);
@@ -976,8 +1074,6 @@ async function returnToLandingFromOnboarding() {
   localStorage.removeItem(DOCS_KEY);
   state.documents = [];
   state.nextDocId = 1;
-  document.getElementById("onboarding").classList.add("hidden");
-  document.body.classList.remove("onboarding-open");
   _onboardingSource = null;
   _onboardingMode = "signup";
   _startingOnboarding = false;
@@ -990,36 +1086,56 @@ async function returnToLandingFromOnboarding() {
   wireLanding();
 }
 
+function loadAvatarColor() {
+  return localStorage.getItem(AVATAR_COLOR_KEY) || "#8a6262";
+}
+
+function applyAvatarColor(color) {
+  document.documentElement.style.setProperty("--avatar-color", color);
+}
+
+async function saveAvatarColor(color) {
+  localStorage.setItem(AVATAR_COLOR_KEY, color);
+  applyAvatarColor(color);
+  if (supabaseClient && state.currentUser) {
+    try {
+      await supabaseClient.auth.updateUser({ data: { avatar_color: color } });
+      if (state.currentUser.user_metadata) {
+        state.currentUser.user_metadata.avatar_color = color;
+      }
+    } catch {}
+  }
+}
+
+function renderColorSwatches() {
+  const container = document.getElementById("prof-color-swatches");
+  if (!container) return;
+  const current = loadAvatarColor();
+  container.innerHTML = AVATAR_COLORS.map((color) =>
+    `<button class="prof-color-swatch${color === current ? " active" : ""}" data-color="${color}" style="background:${color}" aria-label="Profile color ${color}" type="button"></button>`
+  ).join("");
+}
+
 function setAvatarInitial(user) {
   const initial = user
     ? (user.user_metadata?.display_name || user.email || "?")[0].toUpperCase()
-    : null;
+    : "?";
 
-  ["profile-btn", "prof-close-btn"].forEach((btnId) => {
-    const btn = document.getElementById(btnId);
-    if (!btn) return;
-    const iconEl    = btn.querySelector("svg");
-    const initialEl = btn.querySelector(".avatar-initial");
-    if (!iconEl || !initialEl) return;
-    if (initial) {
-      iconEl.classList.add("hidden");
-      initialEl.textContent = initial;
-      initialEl.classList.remove("hidden");
-    } else {
-      iconEl.classList.remove("hidden");
-      initialEl.classList.add("hidden");
-    }
-  });
+  const el1 = document.getElementById("profile-btn-initial");
+  if (el1) el1.textContent = initial;
+
+  const el2 = document.getElementById("prof-close-initial");
+  if (el2) el2.textContent = initial;
 
   const lgEl = document.getElementById("prof-avatar-lg");
-  if (lgEl) {
-    if (initial) {
-      lgEl.innerHTML = initial;
-      lgEl.style.fontSize = "2.2rem";
-    } else {
-      lgEl.innerHTML = `<svg viewBox="0 0 20 20" fill="currentColor" width="36" height="36" aria-hidden="true"><path d="M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-6 8a6 6 0 0 1 12 0H4z"/></svg>`;
-    }
+  if (lgEl) lgEl.textContent = initial;
+
+  // Prefer color stored in Supabase metadata, fall back to localStorage
+  const color = user?.user_metadata?.avatar_color || loadAvatarColor();
+  if (user?.user_metadata?.avatar_color) {
+    localStorage.setItem(AVATAR_COLOR_KEY, user.user_metadata.avatar_color);
   }
+  applyAvatarColor(color);
 }
 
 function renderProfileDocs() {
@@ -1055,6 +1171,7 @@ function openDocModalAdd() {
   document.getElementById("doc-submit-btn").textContent = "Save Document";
   document.getElementById("doc-country").value = "";
   document.getElementById("doc-type").value = "Passport";
+  document.getElementById("doc-expiry").value = "";
   document.getElementById("doc-modal").showModal();
 }
 
@@ -1066,6 +1183,7 @@ function openDocModalEdit(docId) {
   document.getElementById("doc-submit-btn").textContent = "Update Document";
   document.getElementById("doc-country").value = doc.country;
   document.getElementById("doc-type").value = doc.type;
+  document.getElementById("doc-expiry").value = doc.expirationDate || "";
   document.getElementById("doc-modal").showModal();
 }
 
@@ -1091,6 +1209,7 @@ function wireProfile() {
     }
 
     renderProfileDocs();
+    renderColorSwatches();
     overlay.classList.remove("hidden");
   }
 
@@ -1098,6 +1217,18 @@ function wireProfile() {
 
   profileBtn.addEventListener("click", openProfile);
   closeBtn.addEventListener("click", closeProfile);
+  document.getElementById("prof-wordmark-btn")?.addEventListener("click", closeProfile);
+  document.getElementById("prof-back-btn")?.addEventListener("click", closeProfile);
+
+  // Color swatch picker (delegated — container re-renders on each open)
+  document.getElementById("prof-color-swatches")?.addEventListener("click", async (e) => {
+    const swatch = e.target.closest("[data-color]");
+    if (!swatch) return;
+    const color = swatch.dataset.color;
+    document.querySelectorAll(".prof-color-swatch").forEach((s) => s.classList.remove("active"));
+    swatch.classList.add("active");
+    await saveAvatarColor(color);
+  });
 
   // Sign in prompt from profile (redirect to onboarding)
   document.getElementById("prof-signin-prompt")?.addEventListener("click", () => {
@@ -1377,8 +1508,9 @@ function wireOnboarding() {
     hideError(s2Error);
     resetButtons();
 
-    backBtn?.classList.toggle("hidden", _onboardingSource !== "landing");
-    wordmarkBtn?.classList.toggle("onb-wordmark-btn--interactive", _onboardingSource === "landing");
+    backBtn?.classList.remove("hidden");
+    if (backBtn) backBtn.textContent = _onboardingSource === "landing" ? "← Back" : "← Close";
+    wordmarkBtn?.classList.add("onb-wordmark-btn--interactive");
   }
 
   _resetOnboardingUI = resetOnboardingUI;
@@ -1416,15 +1548,16 @@ function wireOnboarding() {
     await refreshStatusesFromApi();
   }
 
-  backBtn?.addEventListener("click", async () => {
-    if (_onboardingSource !== "landing") return;
-    await returnToLandingFromOnboarding();
-  });
+  async function handleOnboardingBack() {
+    if (_onboardingSource === "landing") {
+      await returnToLandingFromOnboarding();
+    } else {
+      closeOnboardingOverlay();
+    }
+  }
 
-  wordmarkBtn?.addEventListener("click", async () => {
-    if (_onboardingSource !== "landing") return;
-    await returnToLandingFromOnboarding();
-  });
+  backBtn?.addEventListener("click", handleOnboardingBack);
+  wordmarkBtn?.addEventListener("click", handleOnboardingBack);
 
   // ── Step 1: Sign-up ───────────────────────────────────
 
@@ -1938,6 +2071,9 @@ async function initMainApp(topology, options = {}) {
 
 async function init() {
   try {
+    // Apply saved avatar color immediately so the button looks right before auth resolves
+    applyAvatarColor(loadAvatarColor());
+
     // Start all fetches in parallel immediately
     const topologyPromise = fetchJson(GEOJSON_URL);
     const metadataPromise = loadCountryMetadata();
